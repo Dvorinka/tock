@@ -1,0 +1,872 @@
+package httpapi
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"net/smtp"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pquerna/otp/totp"
+
+	"github.com/Dvorinka/tock/internal/auth"
+	"github.com/Dvorinka/tock/internal/oauth2"
+)
+
+type Server struct {
+	pool       *pgxpool.Pool
+	spa        *spaHandler
+	sessions   *auth.Store
+	oauth      *oauth2.Server
+	appURL     string
+	smtpAddr   string
+	mailFrom   string
+	secureCookies bool
+	registration  bool
+}
+
+func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, smtpAddr string, secure, registration bool) *Server {
+	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
+		appURL: appURL, smtpAddr: smtpAddr, mailFrom: "tock@localhost",
+		secureCookies: secure, registration: registration}
+}
+
+func (s *Server) loadUser(ctx context.Context, id string) (*auth.User, error) {
+	u := &auth.User{}
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, name, email, password, email_verified_at, pending_email, current_team_id,
+		       timezone, week_start, profile_photo_path, two_factor_secret,
+		       two_factor_recovery_codes, two_factor_confirmed_at, remember_token,
+		       send_time_entry_still_running_email
+		FROM users WHERE id = $1`, id).Scan(
+		&u.ID, &u.Name, &u.Email, &u.Password, &u.EmailVerifiedAt, &u.PendingEmail,
+		&u.CurrentOrganizationID, &u.Timezone, &u.WeekStart, &u.ProfilePhotoPath,
+		&u.TwoFactorSecret, &u.TwoFactorRecovery, &u.TwoFactorConfirmedAt,
+		&u.RememberToken, &u.SendStillRunningEmail)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (s *Server) userByEmail(ctx context.Context, email string) (*auth.User, error) {
+	var id string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(email) = lower($1) AND is_placeholder = false`,
+		email).Scan(&id); err != nil {
+		return nil, err
+	}
+	return s.loadUser(ctx, id)
+}
+
+// webUserMiddleware resolves session user + org permissions into the context.
+func (s *Server) webUserMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := auth.SessionFromContext(r.Context())
+		if sess != nil && sess.UserID != nil {
+			if u, err := s.loadUser(r.Context(), *sess.UserID); err == nil {
+				ctx := auth.WithUser(r.Context(), u)
+				if u.CurrentOrganizationID != nil {
+					var role string
+					var empTasks bool
+					if err := s.pool.QueryRow(ctx, `
+						SELECT m.role, o.employees_can_manage_tasks
+						FROM members m JOIN organizations o ON o.id = m.organization_id
+						WHERE m.user_id = $1 AND m.organization_id = $2`,
+						u.ID, *u.CurrentOrganizationID).Scan(&role, &empTasks); err == nil {
+						ctx = context.WithValue(ctx, ctxPerms, auth.PermissionsForRole(role, empTasks))
+					}
+				}
+				r = r.WithContext(ctx)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// csrfMiddleware guards mutating web requests.
+func csrfMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if err := auth.CheckCSRF(r); err != nil {
+				writeMessage(w, http.StatusForbidden, "CSRF token mismatch")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth.UserFromContext(r.Context()) == nil {
+			if r.Header.Get("X-Inertia") != "" || strings.HasPrefix(r.URL.Path, "/api/") {
+				writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+				return
+			}
+			sess := auth.SessionFromContext(r.Context())
+			if sess != nil {
+				sess.Set("url.intended", r.URL.RequestURI())
+			}
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requireVerified(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := auth.UserFromContext(r.Context())
+		if u != nil && u.EmailVerifiedAt == nil {
+			if r.Header.Get("X-Inertia") != "" {
+				writeMessage(w, http.StatusConflict, "Your email address is not verified.")
+				return
+			}
+			http.Redirect(w, r, "/email/verify", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func guestOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth.UserFromContext(r.Context()) != nil {
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ---- request helpers ----
+
+func decodeBody(r *http.Request, v any) error {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		return json.NewDecoder(r.Body).Decode(v)
+	}
+	if err := r.ParseForm(); err != nil {
+		return err
+	}
+	m := map[string]any{}
+	for k := range r.Form {
+		m[k] = r.Form.Get(k)
+	}
+	b, _ := json.Marshal(m)
+	return json.Unmarshal(b, v)
+}
+
+func flashErrors(r *http.Request, errs map[string]string) {
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		sess.Set("errors", errs)
+	}
+}
+
+func backWithErrors(w http.ResponseWriter, r *http.Request, errs map[string]string, referer string) {
+	flashErrors(r, errs)
+	if referer == "" {
+		referer = r.Referer()
+	}
+	if referer == "" {
+		referer = r.URL.RequestURI()
+	}
+	Redirect(w, r, referer)
+}
+
+// ---- login ----
+
+func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
+	status := ""
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		if v, ok := sess.Pull("status").(string); ok {
+			status = v
+		}
+	}
+	s.spa.Render(w, r, "Auth/Login", map[string]any{
+		"canResetPassword": true,
+		"status":           status,
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Remember bool   `json:"remember"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		backWithErrors(w, r, map[string]string{"email": "These credentials do not match our records."}, "/login")
+		return
+	}
+	u, err := s.userByEmail(r.Context(), body.Email)
+	if err != nil || u.Password == nil || !auth.CheckPassword(*u.Password, body.Password) {
+		backWithErrors(w, r, map[string]string{"email": "These credentials do not match our records."}, "/login")
+		return
+	}
+	sess := auth.SessionFromContext(r.Context())
+	if u.TwoFactorSecret != nil && u.TwoFactorConfirmedAt != nil {
+		sess.Set("login.id", u.ID)
+		sess.Set("login.remember", body.Remember)
+		Redirect(w, r, "/two-factor-challenge")
+		return
+	}
+	s.login(w, r, u, body.Remember)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {
+	sess := auth.SessionFromContext(r.Context())
+	ns := s.sessions.Regenerate(r.Context(), sess)
+	* sess = *ns
+	sess.UserID = &u.ID
+	sess.Dirty = true
+	if remember {
+		_ = s.sessions.SetRecaller(r.Context(), w, u.ID, s.secureCookies)
+	}
+	intended := ""
+	if v, ok := sess.Pull("url.intended").(string); ok {
+		intended = v
+	}
+	if intended == "" {
+		if q := r.URL.Query().Get("redirect"); q != "" && strings.HasPrefix(q, "/") {
+			intended = q
+		}
+	}
+	if intended == "" {
+		intended = "/dashboard"
+	}
+	Redirect(w, r, intended)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromContext(r.Context())
+	if sess != nil {
+		if sess.UserID != nil {
+			s.sessions.ClearRecaller(r.Context(), w, *sess.UserID)
+		}
+		sess.Destroy = true
+	}
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// ---- register ----
+
+func (s *Server) handleRegisterForm(w http.ResponseWriter, r *http.Request) {
+	s.spa.Render(w, r, "Auth/Register", map[string]any{})
+}
+
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.registration {
+		writeMessage(w, http.StatusForbidden, "Registration is disabled.")
+		return
+	}
+	var body struct {
+		Name                 string `json:"name"`
+		Email                string `json:"email"`
+		Password             string `json:"password"`
+		PasswordConfirmation string `json:"password_confirmation"`
+		Timezone             string `json:"timezone"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		backWithErrors(w, r, map[string]string{"email": "Invalid request."}, "/register")
+		return
+	}
+	errs := map[string]string{}
+	if body.Name == "" {
+		errs["name"] = "The name field is required."
+	}
+	if !strings.Contains(body.Email, "@") {
+		errs["email"] = "The email field must be a valid email address."
+	}
+	if len(body.Password) < 8 {
+		errs["password"] = "The password field must be at least 8 characters."
+	} else if body.Password != body.PasswordConfirmation {
+		errs["password"] = "The password field confirmation does not match."
+	}
+	if len(errs) == 0 {
+		var taken bool
+		_ = s.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1))`,
+			body.Email).Scan(&taken)
+		if taken {
+			errs["email"] = "The email has already been taken."
+		}
+	}
+	if len(errs) > 0 {
+		backWithErrors(w, r, errs, "/register")
+		return
+	}
+	tz := body.Timezone
+	if tz == "" {
+		tz = "UTC"
+	}
+	hash, _ := auth.HashPassword(body.Password)
+	userID, orgID := newUUID(), newUUID()
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if _, err = tx.Exec(r.Context(), `
+		INSERT INTO users (id, name, email, password, timezone, week_start, is_placeholder, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'monday', false, now(), now())`,
+		userID, body.Name, body.Email, hash, tz); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `
+		INSERT INTO organizations (id, user_id, name, personal_team, currency,
+			number_format, currency_format, date_format, interval_format, time_format,
+			created_at, updated_at)
+		VALUES ($1, $2, $3, true, 'EUR', 'point-comma', 'iso-code-after-with-space',
+			'hyphen-separated-yyyy-mm-dd', 'hours-minutes', '24-hours', now(), now())`,
+		orgID, userID, body.Name+"'s Organization"); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `
+		INSERT INTO members (id, organization_id, user_id, role, created_at, updated_at)
+		VALUES ($1, $2, $3, 'owner', now(), now())`, newUUID(), orgID, userID); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE users SET current_team_id = $1 WHERE id = $2`, orgID, userID); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	u, _ := s.loadUser(r.Context(), userID)
+	_ = s.sendVerificationEmail(r, u)
+	s.login(w, r, u, false)
+}
+
+// ---- password reset ----
+
+func (s *Server) handleForgotForm(w http.ResponseWriter, r *http.Request) {
+	status := ""
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		if v, ok := sess.Pull("status").(string); ok {
+			status = v
+		}
+	}
+	s.spa.Render(w, r, "Auth/ForgotPassword", map[string]any{"status": status})
+}
+
+func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	_ = decodeBody(r, &body)
+	sess := auth.SessionFromContext(r.Context())
+	if u, err := s.userByEmail(r.Context(), body.Email); err == nil {
+		token := auth.RandomToken(32)
+		sum := sha256.Sum256([]byte(token))
+		_, _ = s.pool.Exec(r.Context(), `
+			INSERT INTO password_reset_tokens (email, token, created_at)
+			VALUES ($1, $2, now())
+			ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
+			u.Email, hex.EncodeToString(sum[:]))
+		link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
+		_ = s.sendMail(u.Email, "Reset Password Notification",
+			"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
+	}
+	if sess != nil {
+		sess.Set("status", "We have emailed your password reset link.")
+	}
+	Redirect(w, r, "/forgot-password")
+}
+
+func (s *Server) handleResetForm(w http.ResponseWriter, r *http.Request) {
+	s.spa.Render(w, r, "Auth/ResetPassword", map[string]any{
+		"email": r.URL.Query().Get("email"),
+		"token": chi.URLParam(r, "token"),
+	})
+}
+
+func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token                string `json:"token"`
+		Email                string `json:"email"`
+		Password             string `json:"password"`
+		PasswordConfirmation string `json:"password_confirmation"`
+	}
+	_ = decodeBody(r, &body)
+	errs := map[string]string{}
+	if len(body.Password) < 8 {
+		errs["password"] = "The password field must be at least 8 characters."
+	} else if body.Password != body.PasswordConfirmation {
+		errs["password"] = "The password field confirmation does not match."
+	}
+	var hashed string
+	var created *time.Time
+	if err := s.pool.QueryRow(r.Context(),
+		`SELECT token, created_at FROM password_reset_tokens WHERE email = $1`,
+		body.Email).Scan(&hashed, &created); err != nil {
+		errs["email"] = "This password reset token is invalid."
+	} else {
+		sum := sha256.Sum256([]byte(body.Token))
+		if !hmac.Equal([]byte(hex.EncodeToString(sum[:])), []byte(hashed)) ||
+			created == nil || time.Since(*created) > time.Hour {
+			errs["email"] = "This password reset token is invalid."
+		}
+	}
+	if len(errs) > 0 {
+		backWithErrors(w, r, errs, r.Referer())
+		return
+	}
+	hash, _ := auth.HashPassword(body.Password)
+	_, _ = s.pool.Exec(r.Context(), `UPDATE users SET password = $1 WHERE email = $2`, hash, body.Email)
+	_, _ = s.pool.Exec(r.Context(), `DELETE FROM password_reset_tokens WHERE email = $1`, body.Email)
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		sess.Set("status", "Your password has been reset.")
+	}
+	Redirect(w, r, "/login")
+}
+
+// ---- email verification ----
+
+func (s *Server) signVerifyURL(userID string, email string, expires time.Time) string {
+	hash := fmt.Sprintf("%x", sha1.Sum([]byte(email)))
+	mac := hmac.New(sha256.New, []byte("tock-verify"))
+	mac.Write([]byte(userID + "|" + hash + "|" + strconv.FormatInt(expires.Unix(), 10)))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return fmt.Sprintf("%s/email/verify/%s/%s?expires=%d&signature=%s",
+		s.appURL, userID, hash, expires.Unix(), sig)
+}
+
+func (s *Server) verifySignedURL(r *http.Request) bool {
+	userID := chi.URLParam(r, "id")
+	hash := chi.URLParam(r, "hash")
+	expires, _ := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
+	if expires < time.Now().Unix() {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte("tock-verify"))
+	mac.Write([]byte(userID + "|" + hash + "|" + strconv.FormatInt(expires, 10)))
+	return hmac.Equal([]byte(r.URL.Query().Get("signature")), []byte(hex.EncodeToString(mac.Sum(nil))))
+}
+
+func (s *Server) sendVerificationEmail(r *http.Request, u *auth.User) error {
+	link := s.signVerifyURL(u.ID, u.Email, time.Now().Add(24*time.Hour))
+	return s.sendMail(u.Email, "Verify Email Address",
+		"Please click the button below to verify your email address.\n\nVerify Email Address: "+link+
+			"\n\nIf you did not create an account, no further action is required.")
+}
+
+func (s *Server) sendMail(to, subject, body string) error {
+	if s.smtpAddr == "" {
+		return nil // mail disabled
+	}
+	msg := "From: " + s.mailFrom + "\r\nTo: " + to + "\r\nSubject: " + subject + "\r\n\r\n" + body + "\r\n"
+	return smtp.SendMail(s.smtpAddr, nil, s.mailFrom, []string{to}, []byte(msg))
+}
+
+func (s *Server) handleVerifyNotice(w http.ResponseWriter, r *http.Request) {
+	s.spa.Render(w, r, "Auth/VerifyEmail", map[string]any{"status": ""})
+}
+
+func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	if !s.verifySignedURL(r) || chi.URLParam(r, "id") != u.ID {
+		http.Error(w, "Invalid signature.", http.StatusForbidden)
+		return
+	}
+	if u.EmailVerifiedAt == nil {
+		_, _ = s.pool.Exec(r.Context(),
+			`UPDATE users SET email_verified_at = now() WHERE id = $1`, u.ID)
+	}
+	http.Redirect(w, r, "/dashboard?verified=1", http.StatusFound)
+}
+
+func (s *Server) handleResendVerificationWeb(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	if u.EmailVerifiedAt != nil {
+		Redirect(w, r, "/dashboard")
+		return
+	}
+	_ = s.sendVerificationEmail(r, u)
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		sess.Set("status", "A new verification link has been sent to the email address you provided during registration.")
+	}
+	backWithErrors(w, r, map[string]string{}, "/email/verify")
+}
+
+// ---- password confirm ----
+
+func (s *Server) handleConfirmPasswordForm(w http.ResponseWriter, r *http.Request) {
+	s.spa.Render(w, r, "Auth/ConfirmPassword", map[string]any{})
+}
+
+func (s *Server) handleConfirmPassword(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	var body struct {
+		Password string `json:"password"`
+	}
+	_ = decodeBody(r, &body)
+	if u == nil || u.Password == nil || !auth.CheckPassword(*u.Password, body.Password) {
+		backWithErrors(w, r, map[string]string{"password": "The password is incorrect."}, "/user/confirm-password")
+		return
+	}
+	sess := auth.SessionFromContext(r.Context())
+	sess.Set("auth.password_confirmed_at", time.Now().Unix())
+	Redirect(w, r, "/dashboard")
+}
+
+func (s *Server) handlePasswordConfirmationStatus(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromContext(r.Context())
+	confirmed := false
+	if sess != nil {
+		if ts, ok := sess.Get("auth.password_confirmed_at").(float64); ok {
+			confirmed = time.Since(time.Unix(int64(ts), 0)) < 3*time.Hour
+		} else if ts, ok := sess.Get("auth.password_confirmed_at").(int64); ok {
+			confirmed = time.Since(time.Unix(ts, 0)) < 3*time.Hour
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"confirmed": confirmed})
+}
+
+// ---- two-factor ----
+
+func (s *Server) handleTwoFactorChallengeForm(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromContext(r.Context())
+	if sess == nil || sess.GetString("login.id") == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	s.spa.Render(w, r, "Auth/TwoFactorChallenge", map[string]any{})
+}
+
+func (s *Server) handleTwoFactorChallenge(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromContext(r.Context())
+	if sess == nil || sess.GetString("login.id") == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	u, err := s.loadUser(r.Context(), sess.GetString("login.id"))
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	var body struct {
+		Code         string `json:"code"`
+		RecoveryCode string `json:"recovery_code"`
+	}
+	_ = decodeBody(r, &body)
+	ok := false
+	if body.Code != "" && u.TwoFactorSecret != nil {
+		ok = totp.Validate(body.Code, *u.TwoFactorSecret)
+	}
+	if !ok && body.RecoveryCode != "" && u.TwoFactorRecovery != nil {
+		var codes []string
+		if json.Unmarshal([]byte(*u.TwoFactorRecovery), &codes) == nil {
+			for i, c := range codes {
+				if subtle_EQ(c, body.RecoveryCode) {
+					codes = append(codes[:i], codes[i+1:]...)
+					enc, _ := json.Marshal(codes)
+					_, _ = s.pool.Exec(r.Context(),
+						`UPDATE users SET two_factor_recovery_codes = $1 WHERE id = $2`,
+						string(enc), u.ID)
+					ok = true
+					break
+				}
+			}
+		}
+	}
+	if !ok {
+		errs := map[string]string{"code": "The provided two factor authentication code was invalid."}
+		if body.RecoveryCode != "" {
+			errs = map[string]string{"recovery_code": "The provided two factor recovery code was invalid."}
+		}
+		backWithErrors(w, r, errs, "/two-factor-challenge")
+		return
+	}
+	remember := sess.Get("login.remember") == true
+	sess.Delete("login.id")
+	sess.Delete("login.remember")
+	s.login(w, r, u, remember)
+}
+
+func subtle_EQ(a, b string) bool {
+	return hmac.Equal([]byte(a), []byte(b))
+}
+
+func (s *Server) handleEnableTwoFactor(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	key, err := totp.Generate(totp.GenerateOpts{Issuer: "tock", AccountName: u.Email})
+	if err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	codes := make([]string, 8)
+	for i := range codes {
+		codes[i] = auth.RandomID(5) + "-" + auth.RandomID(5)
+	}
+	enc, _ := json.Marshal(codes)
+	if _, err := s.pool.Exec(r.Context(), `
+		UPDATE users SET two_factor_secret = $1, two_factor_recovery_codes = $2,
+			two_factor_confirmed_at = NULL WHERE id = $3`,
+		key.Secret(), string(enc), u.ID); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	Redirect(w, r, "/user/profile")
+}
+
+func (s *Server) handleConfirmTwoFactor(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	_ = decodeBody(r, &body)
+	if u.TwoFactorSecret == nil || !totp.Validate(body.Code, *u.TwoFactorSecret) {
+		backWithErrors(w, r, map[string]string{"code": "The provided two factor authentication code was invalid."}, r.Referer())
+		return
+	}
+	_, _ = s.pool.Exec(r.Context(),
+		`UPDATE users SET two_factor_confirmed_at = now() WHERE id = $1`, u.ID)
+	Redirect(w, r, "/user/profile")
+}
+
+func (s *Server) handleDisableTwoFactor(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	_, _ = s.pool.Exec(r.Context(), `
+		UPDATE users SET two_factor_secret = NULL, two_factor_recovery_codes = NULL,
+			two_factor_confirmed_at = NULL WHERE id = $1`, u.ID)
+	Redirect(w, r, "/user/profile")
+}
+
+func (s *Server) handleTwoFactorQR(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil || u.TwoFactorSecret == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	otpauth := fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s",
+		url.QueryEscape("tock"), url.QueryEscape(u.Email), *u.TwoFactorSecret, url.QueryEscape("tock"))
+	svg := qrSVG(otpauth)
+	writeJSON(w, http.StatusOK, map[string]any{"svg": svg, "url": otpauth})
+}
+
+func (s *Server) handleTwoFactorSecret(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil || u.TwoFactorSecret == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"secretKey": *u.TwoFactorSecret})
+}
+
+func (s *Server) handleRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	var codes []string
+	if u.TwoFactorRecovery != nil {
+		_ = json.Unmarshal([]byte(*u.TwoFactorRecovery), &codes)
+	}
+	if codes == nil {
+		codes = []string{}
+	}
+	writeJSON(w, http.StatusOK, codes)
+}
+
+func (s *Server) handleRegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+		return
+	}
+	codes := make([]string, 8)
+	for i := range codes {
+		codes[i] = auth.RandomID(5) + "-" + auth.RandomID(5)
+	}
+	enc, _ := json.Marshal(codes)
+	_, _ = s.pool.Exec(r.Context(),
+		`UPDATE users SET two_factor_recovery_codes = $1 WHERE id = $2`, string(enc), u.ID)
+	writeJSON(w, http.StatusOK, codes)
+}
+
+// ---- dashboard + oauth views ----
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	s.spa.Render(w, r, "Dashboard", map[string]any{})
+}
+
+// consentPage is the passport::authorize blade equivalent.
+var consentTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authorize — tock</title>
+<style>body{font-family:sans-serif;max-width:480px;margin:80px auto;padding:0 20px}
+.btn{display:inline-block;padding:10px 24px;margin-right:12px;border:0;border-radius:6px;cursor:pointer;text-decoration:none;font-size:14px}
+.approve{background:#16a34a;color:#fff}.deny{background:#dc2626;color:#fff}
+.card{border:1px solid #e5e7eb;border-radius:8px;padding:24px}</style></head>
+<body><div class="card">
+<h2>Authorization Request</h2>
+<p><strong>{{.ClientName}}</strong> is requesting permission to access your account.</p>
+{{if .Scopes}}<p>This application will be able to: {{range .Scopes}}<em>{{.}}</em> {{end}}</p>{{end}}
+<form method="POST" action="/oauth/authorize" style="display:inline">
+<input type="hidden" name="_token" value="{{.CSRF}}">
+<input type="hidden" name="auth_token" value="{{.AuthToken}}">
+<button type="submit" class="btn approve">Authorize</button>
+</form>
+<form method="POST" action="/oauth/authorize/deny" style="display:inline">
+<input type="hidden" name="_token" value="{{.CSRF}}">
+<input type="hidden" name="auth_token" value="{{.AuthToken}}">
+<button type="submit" class="btn deny">Deny</button>
+</form>
+</div></body></html>`))
+
+func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, clientID, clientName string, scopes []string) {
+	sess := auth.SessionFromContext(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = consentTemplate.Execute(w, map[string]any{
+		"ClientName": clientName,
+		"Scopes":     scopes,
+		"CSRF":       sess.GetString("_token"),
+		"AuthToken":  sess.GetString("authToken"),
+	})
+}
+
+func (s *Server) handleDenyPost(w http.ResponseWriter, r *http.Request) {
+	if err := auth.CheckCSRF(r); err != nil {
+		http.Error(w, "CSRF token mismatch", http.StatusForbidden)
+		return
+	}
+	r.Method = http.MethodDelete
+	s.oauth.DenyPost(w, r)
+}
+
+// ---- profile ----
+
+func (s *Server) handleUpdateProfileInformation(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	var body struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	_ = decodeBody(r, &body)
+	errs := map[string]string{}
+	if body.Name == "" {
+		errs["name"] = "The name field is required."
+	}
+	if !strings.Contains(body.Email, "@") {
+		errs["email"] = "The email field must be a valid email address."
+	}
+	if len(errs) > 0 {
+		backWithErrors(w, r, errs, r.Referer())
+		return
+	}
+	pending := u.PendingEmail
+	if !strings.EqualFold(body.Email, u.Email) {
+		var taken bool
+		_ = s.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM users WHERE lower(email) = lower($1) AND id <> $2)`,
+			body.Email, u.ID).Scan(&taken)
+		if taken {
+			backWithErrors(w, r, map[string]string{"email": "The email has already been taken."}, r.Referer())
+			return
+		}
+		pending = &body.Email
+	}
+	_, _ = s.pool.Exec(r.Context(),
+		`UPDATE users SET name = $1, pending_email = $2, updated_at = now() WHERE id = $3`,
+		body.Name, pending, u.ID)
+	Redirect(w, r, "/user/profile")
+}
+
+func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	var body struct {
+		CurrentPassword      string `json:"current_password"`
+		Password             string `json:"password"`
+		PasswordConfirmation string `json:"password_confirmation"`
+	}
+	_ = decodeBody(r, &body)
+	errs := map[string]string{}
+	if u.Password != nil && !auth.CheckPassword(*u.Password, body.CurrentPassword) {
+		errs["current_password"] = "The provided password does not match your current password."
+	}
+	if len(body.Password) < 8 {
+		errs["password"] = "The password field must be at least 8 characters."
+	} else if body.Password != body.PasswordConfirmation {
+		errs["password"] = "The password field confirmation does not match."
+	}
+	if len(errs) > 0 {
+		backWithErrors(w, r, errs, r.Referer())
+		return
+	}
+	hash, _ := auth.HashPassword(body.Password)
+	_, _ = s.pool.Exec(r.Context(), `UPDATE users SET password = $1 WHERE id = $2`, hash, u.ID)
+	Redirect(w, r, "/user/profile")
+}
+
+// profilePlaceholder renders the Jetstream profile Inertia page.
+func (s *Server) handleProfileShow(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromContext(r.Context())
+	confirmed := false
+	if sess != nil {
+		if ts, ok := sess.Get("auth.password_confirmed_at").(float64); ok {
+			confirmed = time.Since(time.Unix(int64(ts), 0)) < 3*time.Hour
+		}
+	}
+	s.spa.Render(w, r, "Profile/Show", map[string]any{
+		"confirmsTwoFactorAuthentication": !confirmed,
+	})
+}
+
+func newUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// qrSVG renders a minimal QR placeholder — see shortcut note.
+// shortcut: emits the otpauth URL for manual entry; real QR rasterization
+// lands with a qrcode dependency if the FE needs the SVG.
+func qrSVG(_ string) string {
+	return ""
+}
+
+var _ = pgx.ErrNoRows

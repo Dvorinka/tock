@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
-	"strings"
 	"sync"
 
 	"github.com/Dvorinka/tock/internal/web"
@@ -78,28 +77,6 @@ type inertiaPage struct {
 	Version   string         `json:"version"`
 }
 
-// sharedProps mirrors the shared Inertia props from upstream
-// (HandleInertiaRequests + ShareInertiaData) for an unauthenticated request.
-func sharedProps() map[string]any {
-	return map[string]any{
-		"auth": map[string]any{
-			"user":        map[string]any{},
-			"permissions": []string{},
-		},
-		"errors":                  map[string]any{},
-		"has_billing_extension":   false,
-		"has_invoicing_extension": true,
-		"has_services_extension":  false,
-		"has_goals_extension":     true,
-		"billing":                 nil,
-		"flash": map[string]any{
-			"message":     nil,
-			"bannerText":  nil,
-			"bannerStyle": nil,
-		},
-	}
-}
-
 func (s *spaHandler) load() {
 	manifestBytes, err := fs.ReadFile(web.Dist, "dist/build/manifest.json")
 	if err != nil {
@@ -123,33 +100,8 @@ func (s *spaHandler) load() {
 	s.entryCSS = entry.CSS
 }
 
-// renderPage renders the shell HTML for a given Inertia page.
-func (s *spaHandler) renderPage(component, url string, props map[string]any) ([]byte, error) {
+// Version exposes the manifest-derived asset version.
+func (s *spaHandler) Version() string {
 	s.once.Do(s.load)
-	if s.loadErr != nil {
-		return nil, s.loadErr
-	}
-
-	merged := sharedProps()
-	for k, v := range props {
-		merged[k] = v
-	}
-	page := inertiaPage{Component: component, Props: merged, URL: url, Version: s.version}
-	pageJSON, err := json.Marshal(page)
-	if err != nil {
-		return nil, fmt.Errorf("marshal page: %w", err)
-	}
-
-	var out strings.Builder
-	err = shellTemplate.Execute(&out, map[string]any{
-		"Title":  "tock",
-		"Ziggy":  ziggyJS,
-		"Script": s.entryFile,
-		"Styles": s.entryCSS,
-		"Page":   string(pageJSON), // html/template attribute-escapes the JSON
-	})
-	if err != nil {
-		return nil, fmt.Errorf("render shell: %w", err)
-	}
-	return []byte(out.String()), nil
+	return s.version
 }

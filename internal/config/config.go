@@ -16,6 +16,11 @@ type Config struct {
 	// Dev-only defaults matching upstream .env.example.
 	PersonalAccessClientID     string // TOCK_PERSONAL_ACCESS_CLIENT_ID
 	PersonalAccessClientSecret string // TOCK_PERSONAL_ACCESS_CLIENT_SECRET
+	AppKey             string // TOCK_APP_KEY — session/CSRF HMAC key
+	SMTPAddr           string // TOCK_SMTP_ADDR — mailpit in dev
+	OAuthKeyDir        string // TOCK_OAUTH_KEY_DIR — RSA keypair storage
+	SecureCookies      bool   // TOCK_SECURE_COOKIES
+	Registration       bool   // TOCK_ENABLE_REGISTRATION
 	Logger                     *slog.Logger
 }
 
@@ -29,6 +34,11 @@ func Load() Config {
 		GotenbergURL:               env("TOCK_GOTENBERG_URL", "http://127.0.0.1:3100"),
 		PersonalAccessClientID:     env("TOCK_PERSONAL_ACCESS_CLIENT_ID", "9e27f54d-5dfb-4dde-99d7-834518236c92"),
 		PersonalAccessClientSecret: env("TOCK_PERSONAL_ACCESS_CLIENT_SECRET", "EL5mXp3aF8ITjcwoOXRpbSK7zGrWhW4zTDpQXTkf"),
+		AppKey:             env("TOCK_APP_KEY", ""),
+		SMTPAddr:           env("TOCK_SMTP_ADDR", "127.0.0.1:1025"),
+		OAuthKeyDir:        env("TOCK_OAUTH_KEY_DIR", "storage"),
+		SecureCookies:      env("TOCK_SECURE_COOKIES", "false") == "true",
+		Registration:       env("TOCK_ENABLE_REGISTRATION", "true") == "true",
 	}
 	cfg.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	return cfg
