@@ -129,6 +129,12 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Put("/organizations/{organization}/reports/{report}", srv.handleUpdateReport)
 				r.Delete("/organizations/{organization}/reports/{report}", srv.handleDeleteReport)
 
+				r.Get("/organizations/{organization}/goals", srv.handleIndexGoals)
+				r.Get("/organizations/{organization}/goals/{goal}", srv.handleShowGoal)
+				r.Post("/organizations/{organization}/goals", srv.handleStoreGoal)
+				r.Put("/organizations/{organization}/goals/{goal}", srv.handleUpdateGoal)
+				r.Delete("/organizations/{organization}/goals/{goal}", srv.handleDeleteGoal)
+
 				// Time entries — order matters: literal segments before {timeEntry}.
 				r.Get("/organizations/{organization}/time-entries", srv.handleListTimeEntries)
 				r.Get("/organizations/{organization}/time-entries/export", srv.handleExportTimeEntries)

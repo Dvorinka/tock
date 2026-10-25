@@ -19,6 +19,7 @@ type Querier interface {
 	ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 	ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error)
 	CountClients(ctx context.Context, arg CountClientsParams) (int64, error)
+	CountGoals(ctx context.Context, arg CountGoalsParams) (int64, error)
 	CountInvitations(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountNonPlaceholderMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
@@ -37,6 +38,7 @@ type Querier interface {
 	DeleteAuthCodesForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteClient(ctx context.Context, id pgtype.UUID) error
 	DeleteClientsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteGoal(ctx context.Context, id pgtype.UUID) error
 	DeleteGoalsForMember(ctx context.Context, arg DeleteGoalsForMemberParams) error
 	DeleteGoalsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteInvitation(ctx context.Context, id pgtype.UUID) error
@@ -76,6 +78,7 @@ type Querier interface {
 	FirstUserOrganization(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	GetAccessToken(ctx context.Context, id string) (OauthAccessToken, error)
 	GetClientByID(ctx context.Context, id pgtype.UUID) (Client, error)
+	GetGoalByID(ctx context.Context, id pgtype.UUID) (GetGoalByIDRow, error)
 	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
 	GetMember(ctx context.Context, arg GetMemberParams) (Member, error)
 	// Members -----------------------------------------------------------------
@@ -103,6 +106,7 @@ type Querier interface {
 	InsertAccessToken(ctx context.Context, arg InsertAccessTokenParams) error
 	InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error
 	InsertClient(ctx context.Context, arg InsertClientParams) (Client, error)
+	InsertGoal(ctx context.Context, arg InsertGoalParams) error
 	// Organizations -----------------------------------------------------------
 	InsertOrganization(ctx context.Context, arg InsertOrganizationParams) (Organization, error)
 	InsertPlaceholderUser(ctx context.Context, arg InsertPlaceholderUserParams) (User, error)
@@ -121,6 +125,7 @@ type Querier interface {
 	LatestTeamActivity(ctx context.Context, organizationID pgtype.UUID) ([]LatestTeamActivityRow, error)
 	ListAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]OauthAccessToken, error)
 	ListClientsPaginated(ctx context.Context, arg ListClientsPaginatedParams) ([]Client, error)
+	ListGoalsPaginated(ctx context.Context, arg ListGoalsPaginatedParams) ([]ListGoalsPaginatedRow, error)
 	// Invitations -------------------------------------------------------------
 	ListInvitationsPaginated(ctx context.Context, arg ListInvitationsPaginatedParams) ([]OrganizationInvitation, error)
 	ListMembersForOrg(ctx context.Context, organizationID pgtype.UUID) ([]ListMembersForOrgRow, error)
@@ -180,6 +185,7 @@ type Querier interface {
 	TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error)
 	TimeEntryExistsWithTag(ctx context.Context, arg TimeEntryExistsWithTagParams) (bool, error)
 	UpdateClient(ctx context.Context, arg UpdateClientParams) (Client, error)
+	UpdateGoal(ctx context.Context, arg UpdateGoalParams) error
 	UpdateGoalFilters(ctx context.Context, arg UpdateGoalFiltersParams) error
 	UpdateMemberBillableRate(ctx context.Context, arg UpdateMemberBillableRateParams) error
 	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error
