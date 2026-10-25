@@ -23,24 +23,29 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/Dvorinka/tock/internal/auth"
+	"github.com/Dvorinka/tock/internal/db"
+	"github.com/Dvorinka/tock/internal/domain"
 	"github.com/Dvorinka/tock/internal/oauth2"
 )
 
 type Server struct {
-	pool       *pgxpool.Pool
-	spa        *spaHandler
-	sessions   *auth.Store
-	oauth      *oauth2.Server
-	appURL     string
-	smtpAddr   string
-	mailFrom   string
+	pool          *pgxpool.Pool
+	spa           *spaHandler
+	sessions      *auth.Store
+	oauth         *oauth2.Server
+	domain        *domain.Service
+	appURL        string
+	appKey        string
+	smtpAddr      string
+	mailFrom      string
 	secureCookies bool
 	registration  bool
 }
 
-func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, smtpAddr string, secure, registration bool) *Server {
+func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr string, secure, registration bool) *Server {
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
-		appURL: appURL, smtpAddr: smtpAddr, mailFrom: "tock@localhost",
+		domain: domain.NewService(pool),
+		appURL: appURL, appKey: appKey, smtpAddr: smtpAddr, mailFrom: "tock@localhost",
 		secureCookies: secure, registration: registration}
 }
 
@@ -231,7 +236,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) login(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {
 	sess := auth.SessionFromContext(r.Context())
 	ns := s.sessions.Regenerate(r.Context(), sess)
-	* sess = *ns
+	*sess = *ns
 	sess.UserID = &u.ID
 	sess.Dirty = true
 	if remember {
@@ -266,7 +271,20 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // ---- register ----
 
 func (s *Server) handleRegisterForm(w http.ResponseWriter, r *http.Request) {
-	s.spa.Render(w, r, "Auth/Register", map[string]any{})
+	email := ""
+	if sess := auth.SessionFromContext(r.Context()); sess != nil {
+		if v, ok := sess.Pull("registration_email").(string); ok {
+			email = v
+		}
+	}
+	// Fortify::registerView props — terms/privacy/newsletter are the upstream
+	// config('auth.*') defaults (empty/false in OSS).
+	s.spa.Render(w, r, "Auth/Register", map[string]any{
+		"email":              email,
+		"terms_url":          "",
+		"privacy_policy_url": "",
+		"newsletter_consent": false,
+	})
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +333,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		tz = "UTC"
 	}
 	hash, _ := auth.HashPassword(body.Password)
-	userID, orgID := newUUID(), newUUID()
+	userID := newUUID()
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
@@ -329,25 +347,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	if _, err = tx.Exec(r.Context(), `
-		INSERT INTO organizations (id, user_id, name, personal_team, currency,
-			number_format, currency_format, date_format, interval_format, time_format,
-			created_at, updated_at)
-		VALUES ($1, $2, $3, true, 'EUR', 'point-comma', 'iso-code-after-with-space',
-			'hyphen-separated-yyyy-mm-dd', 'hours-minutes', '24-hours', now(), now())`,
-		orgID, userID, body.Name+"'s Organization"); err != nil {
+	// UserService::createUser — accepted invitations become memberships; a
+	// personal organization is only created when none were accepted.
+	uid, _ := domain.UUID(userID)
+	qtx := db.New(s.pool).WithTx(tx)
+	orgs, err := s.domain.ProcessAcceptedInvitations(r.Context(), qtx, uid, body.Email)
+	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	if _, err = tx.Exec(r.Context(), `
-		INSERT INTO members (id, organization_id, user_id, role, created_at, updated_at)
-		VALUES ($1, $2, $3, 'owner', now(), now())`, newUUID(), orgID, userID); err != nil {
-		writeMessage(w, http.StatusInternalServerError, "server error")
-		return
-	}
-	if _, err = tx.Exec(r.Context(), `UPDATE users SET current_team_id = $1 WHERE id = $2`, orgID, userID); err != nil {
-		writeMessage(w, http.StatusInternalServerError, "server error")
-		return
+	if len(orgs) == 0 {
+		if err := s.domain.MakeSureUserHasAtLeastOneOrganization(r.Context(), qtx, uid, body.Name); err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
 	}
 	if err = tx.Commit(r.Context()); err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")

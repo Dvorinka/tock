@@ -36,9 +36,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.SMTPAddr, cfg.SecureCookies, cfg.Registration)
+	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.SecureCookies, cfg.Registration)
 
-	// API bearer guard.
+	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
 	apiAuth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			uid, err := oauth.AuthenticateAPI(r)
@@ -51,12 +51,18 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
 				return
 			}
+			if u.EmailVerifiedAt == nil {
+				writeMessage(w, http.StatusConflict, "Your email address is not verified.")
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
 		})
 	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
+			r.Get("/currencies", srv.handleCurrencies)
+			r.Get("/time-zones", srv.handleTimeZones)
 			r.Group(func(r chi.Router) {
 				r.Use(apiAuth)
 				r.Get("/users/me", srv.handleUsersMe)
@@ -66,6 +72,26 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/users/{user}/resend-email-verification", srv.handleResendVerification)
 				r.Post("/users/{user}/reset-pending-email", srv.handleResetPendingEmail)
 				r.Get("/users/me/memberships", srv.handleMyMemberships)
+
+				r.Post("/organizations", srv.handleStoreOrganization)
+				r.Get("/organizations/{organization}", srv.handleShowOrganization)
+				r.Put("/organizations/{organization}", srv.handleUpdateOrganization)
+				r.Delete("/organizations/{organization}", srv.handleDestroyOrganization)
+
+				r.Get("/organizations/{organization}/members", srv.handleListMembers)
+				r.Put("/organizations/{organization}/members/{member}", srv.handleUpdateMember)
+				r.Delete("/organizations/{organization}/members/{member}", srv.handleDestroyMember)
+				r.Post("/organizations/{organization}/members/{member}/invite-placeholder", srv.handleInvitePlaceholder)
+				r.Post("/organizations/{organization}/members/{member}/make-placeholder", srv.handleMakePlaceholder)
+				r.Post("/organizations/{organization}/member/{member}/merge-into", srv.handleMergeInto)
+
+				r.Get("/organizations/{organization}/invitations", srv.handleListInvitations)
+				r.Post("/organizations/{organization}/invitations", srv.handleStoreInvitation)
+				r.Post("/organizations/{organization}/invitations/{invitation}/resend", srv.handleResendInvitation)
+				r.Delete("/organizations/{organization}/invitations/{invitation}", srv.handleDestroyInvitation)
+
+				r.Get("/organizations/{organization}/importers", srv.handleImporters)
+				r.Post("/organizations/{organization}/import", srv.handleImport)
 			})
 		})
 		r.NotFound(apiNotFound)
@@ -121,6 +147,15 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Post("/logout", srv.handleLogout)
 		r.Get("/two-factor-challenge", srv.handleTwoFactorChallengeForm)
 		r.Post("/two-factor-challenge", srv.handleTwoFactorChallenge)
+
+		// Invitation accept links — public like upstream; 'signed' on the
+		// legacy route (absolute URL), 'signed:relative' on the current one.
+		r.Get("/team-invitations/{invitation}", func(w http.ResponseWriter, r *http.Request) {
+			srv.handleAcceptInvitation(w, r, false)
+		})
+		r.Get("/organization-invitations/{invitation}", func(w http.ResponseWriter, r *http.Request) {
+			srv.handleAcceptInvitation(w, r, true)
+		})
 
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuth)

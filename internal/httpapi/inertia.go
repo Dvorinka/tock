@@ -89,13 +89,14 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 		for k, v := range sess.PullErrors() {
 			errors[k] = v
 		}
-		if m := sess.Pull("flash.message"); m != nil {
+		// Upstream flashes bare keys via ->with(): message, bannerText, bannerStyle.
+		if m := sess.Pull("message"); m != nil {
 			flash["message"] = m
 		}
-		if m := sess.Pull("flash.bannerText"); m != nil {
+		if m := sess.Pull("bannerText"); m != nil {
 			flash["bannerText"] = m
 		}
-		if m := sess.Pull("flash.bannerStyle"); m != nil {
+		if m := sess.Pull("bannerStyle"); m != nil {
 			flash["bannerStyle"] = m
 		}
 	}
@@ -106,16 +107,16 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 	}
 	if user != nil {
 		authProps["user"] = map[string]any{
-			"id":                          user.ID,
-			"name":                        user.Name,
-			"email":                       user.Email,
-			"pending_email":               user.PendingEmail,
-			"profile_photo_url":           gravatarURL(user.Email),
-			"timezone":                    user.Timezone,
-			"week_start":                  user.WeekStart,
-			"current_organization_id":     user.CurrentOrganizationID,
+			"id":                                  user.ID,
+			"name":                                user.Name,
+			"email":                               user.Email,
+			"pending_email":                       user.PendingEmail,
+			"profile_photo_url":                   gravatarURL(user.Email),
+			"timezone":                            user.Timezone,
+			"week_start":                          user.WeekStart,
+			"current_organization_id":             user.CurrentOrganizationID,
 			"send_time_entry_still_running_email": user.SendStillRunningEmail,
-			"two_factor_enabled":          user.TwoFactorSecret != nil && user.TwoFactorConfirmedAt != nil,
+			"two_factor_enabled":                  user.TwoFactorSecret != nil && user.TwoFactorConfirmedAt != nil,
 		}
 		if perms, ok := r.Context().Value(ctxPerms).([]string); ok {
 			authProps["permissions"] = perms

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Dvorinka/tock/internal/auth"
+	"github.com/Dvorinka/tock/internal/domain"
 )
 
 func gravatarURL(email string) string {
@@ -65,7 +66,7 @@ func (s *Server) handleMyMemberships(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT m.role, o.id, o.name, o.personal_team
+		SELECT m.id, m.role, o.id, o.name, o.currency
 		FROM members m JOIN organizations o ON o.id = m.organization_id
 		WHERE m.user_id = $1`, u.ID)
 	if err != nil {
@@ -75,15 +76,15 @@ func (s *Server) handleMyMemberships(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	data := []map[string]any{}
 	for rows.Next() {
-		var role, orgID, orgName string
-		var personal bool
-		if err := rows.Scan(&role, &orgID, &orgName, &personal); err != nil {
+		var memberID, role, orgID, orgName, currency string
+		if err := rows.Scan(&memberID, &role, &orgID, &orgName, &currency); err != nil {
 			continue
 		}
 		data = append(data, map[string]any{
+			"id":   memberID,
 			"role": role,
 			"organization": map[string]any{
-				"id": orgID, "name": orgName, "personal": personal,
+				"id": orgID, "name": orgName, "currency": currency,
 			},
 		})
 	}
@@ -215,8 +216,9 @@ func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if _, err := s.pool.Exec(r.Context(), `DELETE FROM users WHERE id = $1`, u.ID); err != nil {
-		writeMessage(w, http.StatusInternalServerError, "server error")
+	uid, _ := domain.UUID(u.ID)
+	if err := s.domain.DeleteUser(r.Context(), uid); err != nil {
+		writeDomainErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": u.ID}})

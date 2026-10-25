@@ -11,17 +11,54 @@ import (
 )
 
 type Querier interface {
+	AcceptedInvitationsForEmail(ctx context.Context, lower string) ([]OrganizationInvitation, error)
+	ClearCurrentTeamForOrg(ctx context.Context, currentTeamID pgtype.UUID) error
+	ClearUserCurrentTeam(ctx context.Context, id pgtype.UUID) error
 	ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 	ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error)
+	CountInvitations(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountNonPlaceholderMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountUserMemberships(ctx context.Context, userID pgtype.UUID) (int64, error)
+	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (OrganizationInvitation, error)
 	CreateMember(ctx context.Context, arg CreateMemberParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAccessTokensForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteAuthCodesForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteClientsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteGoalsForMember(ctx context.Context, arg DeleteGoalsForMemberParams) error
+	DeleteGoalsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteInvitation(ctx context.Context, id pgtype.UUID) error
+	// Organization deletion cascade --------------------------------------------
+	DeleteInvitationsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteMember(ctx context.Context, id pgtype.UUID) error
+	DeleteMembersForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteOrganizationRow(ctx context.Context, id pgtype.UUID) error
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) error
 	DeletePasswordReset(ctx context.Context, email string) error
+	DeleteProjectMembersForMember(ctx context.Context, arg DeleteProjectMembersForMemberParams) error
+	DeleteProjectMembersForMemberUser(ctx context.Context, arg DeleteProjectMembersForMemberUserParams) error
+	DeleteProjectMembersForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteProjectsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteReportsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	// Entity reassignment (merge / placeholder transitions) --------------------
+	DeleteRunningTimeEntriesForMember(ctx context.Context, arg DeleteRunningTimeEntriesForMemberParams) error
 	DeleteSession(ctx context.Context, id string) error
+	DeleteTagsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteTasksForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteTimeEntriesForMemberUser(ctx context.Context, arg DeleteTimeEntriesForMemberUserParams) error
+	DeleteTimeEntriesForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteUser(ctx context.Context, id pgtype.UUID) error
+	DeleteUserByID(ctx context.Context, id pgtype.UUID) error
+	DemoteOtherOwners(ctx context.Context, arg DemoteOtherOwnersParams) error
+	FirstUserOrganization(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	GetAccessToken(ctx context.Context, id string) (OauthAccessToken, error)
+	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
 	GetMember(ctx context.Context, arg GetMemberParams) (Member, error)
+	// Members -----------------------------------------------------------------
+	GetMemberByID(ctx context.Context, id pgtype.UUID) (Member, error)
 	GetMembersByUser(ctx context.Context, userID pgtype.UUID) ([]GetMembersByUserRow, error)
 	GetOAuthClient(ctx context.Context, id pgtype.UUID) (OauthClient, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
@@ -31,18 +68,50 @@ type Querier interface {
 	GetSession(ctx context.Context, id string) (Session, error)
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error)
+	GoalsWithMemberFilter(ctx context.Context, arg GoalsWithMemberFilterParams) ([]GoalsWithMemberFilterRow, error)
 	InsertAccessToken(ctx context.Context, arg InsertAccessTokenParams) error
 	InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error
+	// Organizations -----------------------------------------------------------
+	InsertOrganization(ctx context.Context, arg InsertOrganizationParams) (Organization, error)
+	InsertPlaceholderUser(ctx context.Context, arg InsertPlaceholderUserParams) (User, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InvitationExistsForEmail(ctx context.Context, arg InvitationExistsForEmailParams) (bool, error)
+	IsEmailMemberOfOrganization(ctx context.Context, arg IsEmailMemberOfOrganizationParams) (bool, error)
 	ListAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]OauthAccessToken, error)
+	// Invitations -------------------------------------------------------------
+	ListInvitationsPaginated(ctx context.Context, arg ListInvitationsPaginatedParams) ([]OrganizationInvitation, error)
+	ListMembersForOrg(ctx context.Context, organizationID pgtype.UUID) ([]ListMembersForOrgRow, error)
+	ListMembersPaginated(ctx context.Context, arg ListMembersPaginatedParams) ([]ListMembersPaginatedRow, error)
+	// User deletion (DeletionService::deleteUser) -------------------------------
+	ListUserMemberships(ctx context.Context, userID pgtype.UUID) ([]ListUserMembershipsRow, error)
+	MarkInvitationAccepted(ctx context.Context, id pgtype.UUID) error
+	MemberExistsForUser(ctx context.Context, arg MemberExistsForUserParams) (bool, error)
+	PlaceholderMembersByEmail(ctx context.Context, arg PlaceholderMembersByEmailParams) ([]PlaceholderMembersByEmailRow, error)
+	ProjectMembersExistForMemberUser(ctx context.Context, arg ProjectMembersExistForMemberUserParams) (bool, error)
+	// Billable-rate propagation (BillableRateService) ---------------------------
+	PropagateBillableRateForMember(ctx context.Context, arg PropagateBillableRateForMemberParams) error
+	PropagateBillableRateForOrganization(ctx context.Context, arg PropagateBillableRateForOrganizationParams) error
+	ReassignGoalsToMember(ctx context.Context, arg ReassignGoalsToMemberParams) error
+	ReassignProjectMembersToMember(ctx context.Context, arg ReassignProjectMembersToMemberParams) error
+	ReassignProjectMembersToUser(ctx context.Context, arg ReassignProjectMembersToUserParams) error
+	ReassignTimeEntriesToMember(ctx context.Context, arg ReassignTimeEntriesToMemberParams) error
+	ReassignTimeEntriesToUser(ctx context.Context, arg ReassignTimeEntriesToUserParams) error
 	RevokeAccessToken(ctx context.Context, id string) error
 	RevokeRefreshByAccessToken(ctx context.Context, accessTokenID string) error
 	RevokeRefreshToken(ctx context.Context, id string) error
+	SetOrganizationOwner(ctx context.Context, arg SetOrganizationOwnerParams) error
 	SetUserCurrentOrganization(ctx context.Context, arg SetUserCurrentOrganizationParams) error
 	SetUserEmailVerified(ctx context.Context, id pgtype.UUID) error
 	SetUserPendingEmail(ctx context.Context, arg SetUserPendingEmailParams) error
 	SetUserRememberToken(ctx context.Context, arg SetUserRememberTokenParams) error
 	SetUserTwoFactor(ctx context.Context, arg SetUserTwoFactorParams) error
+	// Member removal -----------------------------------------------------------
+	TimeEntriesExistForMemberUser(ctx context.Context, arg TimeEntriesExistForMemberUserParams) (bool, error)
+	UpdateGoalFilters(ctx context.Context, arg UpdateGoalFiltersParams) error
+	UpdateMemberBillableRate(ctx context.Context, arg UpdateMemberBillableRateParams) error
+	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error
+	UpdateMemberUser(ctx context.Context, arg UpdateMemberUserParams) error
+	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpsertPasswordReset(ctx context.Context, arg UpsertPasswordResetParams) error
