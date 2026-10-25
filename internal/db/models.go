@@ -77,6 +77,90 @@ type Goal struct {
 	UpdatedAt      pgtype.Timestamp
 }
 
+type Invoice struct {
+	ID                    pgtype.UUID
+	OrganizationID        pgtype.UUID
+	InvoiceRecipientID    pgtype.UUID
+	Status                string
+	Date                  pgtype.Date
+	DueAt                 pgtype.Date
+	PaidDate              pgtype.Date
+	Reference             string
+	SellerName            string
+	SellerVatin           *string
+	SellerAddressLine1    *string
+	SellerAddressLine2    *string
+	SellerAddressLine3    *string
+	SellerAddressPostCode *string
+	SellerAddressCity     *string
+	SellerAddressCountry  *string
+	SellerPhone           *string
+	SellerEmail           *string
+	Currency              string
+	BillingPeriodStart    pgtype.Date
+	BillingPeriodEnd      pgtype.Date
+	TaxRate               int32
+	DiscountAmount        int64
+	DiscountType          string
+	PaymentIban           *string
+	Footer                *string
+	Notes                 *string
+	PaymentTerms          *string
+	IsEuReverseCharge     bool
+	CreatedAt             pgtype.Timestamp
+	UpdatedAt             pgtype.Timestamp
+}
+
+type InvoiceItem struct {
+	ID          pgtype.UUID
+	InvoiceID   pgtype.UUID
+	Name        string
+	Description *string
+	UnitPrice   int64
+	Quantity    pgtype.Numeric
+	OrderIndex  int32
+	CreatedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
+}
+
+type InvoiceRecipient struct {
+	ID              pgtype.UUID
+	OrganizationID  pgtype.UUID
+	Name            string
+	Vatin           *string
+	AddressLine1    *string
+	AddressLine2    *string
+	AddressLine3    *string
+	AddressPostCode *string
+	AddressCity     *string
+	AddressCountry  *string
+	Phone           *string
+	Email           *string
+	ArchivedAt      pgtype.Timestamp
+	CreatedAt       pgtype.Timestamp
+	UpdatedAt       pgtype.Timestamp
+}
+
+type InvoiceSetting struct {
+	OrganizationID        pgtype.UUID
+	SellerName            *string
+	SellerVatin           *string
+	SellerAddressLine1    *string
+	SellerAddressLine2    *string
+	SellerAddressLine3    *string
+	SellerAddressPostCode *string
+	SellerAddressCity     *string
+	SellerAddressCountry  *string
+	SellerPhone           *string
+	SellerEmail           *string
+	FooterDefault         *string
+	NotesDefault          *string
+	TaxRateDefault        *int32
+	EInvoicingEnabled     bool
+	CreatedAt             pgtype.Timestamp
+	UpdatedAt             pgtype.Timestamp
+}
+
 type Job struct {
 	ID          int64
 	Queue       string

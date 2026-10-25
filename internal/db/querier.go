@@ -21,6 +21,7 @@ type Querier interface {
 	CountClients(ctx context.Context, arg CountClientsParams) (int64, error)
 	CountGoals(ctx context.Context, arg CountGoalsParams) (int64, error)
 	CountInvitations(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountInvoices(ctx context.Context, arg CountInvoicesParams) (int64, error)
 	CountMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountNonPlaceholderMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectMembers(ctx context.Context, projectID pgtype.UUID) (int64, error)
@@ -44,6 +45,9 @@ type Querier interface {
 	DeleteInvitation(ctx context.Context, id pgtype.UUID) error
 	// Organization deletion cascade --------------------------------------------
 	DeleteInvitationsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteInvoice(ctx context.Context, id pgtype.UUID) error
+	DeleteInvoiceItems(ctx context.Context, invoiceID pgtype.UUID) error
+	DeleteInvoiceRecipient(ctx context.Context, id pgtype.UUID) error
 	DeleteMember(ctx context.Context, id pgtype.UUID) error
 	DeleteMembersForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteOrganizationRow(ctx context.Context, id pgtype.UUID) error
@@ -80,6 +84,9 @@ type Querier interface {
 	GetClientByID(ctx context.Context, id pgtype.UUID) (Client, error)
 	GetGoalByID(ctx context.Context, id pgtype.UUID) (GetGoalByIDRow, error)
 	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
+	GetInvoice(ctx context.Context, id pgtype.UUID) (GetInvoiceRow, error)
+	GetInvoiceRecipient(ctx context.Context, id pgtype.UUID) (GetInvoiceRecipientRow, error)
+	GetInvoiceSettings(ctx context.Context, organizationID pgtype.UUID) (InvoiceSetting, error)
 	GetMember(ctx context.Context, arg GetMemberParams) (Member, error)
 	// Members -----------------------------------------------------------------
 	GetMemberByID(ctx context.Context, id pgtype.UUID) (Member, error)
@@ -107,6 +114,9 @@ type Querier interface {
 	InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error
 	InsertClient(ctx context.Context, arg InsertClientParams) (Client, error)
 	InsertGoal(ctx context.Context, arg InsertGoalParams) error
+	InsertInvoice(ctx context.Context, arg InsertInvoiceParams) error
+	InsertInvoiceItem(ctx context.Context, arg InsertInvoiceItemParams) error
+	InsertInvoiceRecipient(ctx context.Context, arg InsertInvoiceRecipientParams) error
 	// Organizations -----------------------------------------------------------
 	InsertOrganization(ctx context.Context, arg InsertOrganizationParams) (Organization, error)
 	InsertPlaceholderUser(ctx context.Context, arg InsertPlaceholderUserParams) (User, error)
@@ -118,6 +128,7 @@ type Querier interface {
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	InsertTimeEntry(ctx context.Context, arg InsertTimeEntryParams) (TimeEntry, error)
 	InvitationExistsForEmail(ctx context.Context, arg InvitationExistsForEmailParams) (bool, error)
+	InvoiceReferenceExists(ctx context.Context, arg InvoiceReferenceExistsParams) (bool, error)
 	IsEmailMemberOfOrganization(ctx context.Context, arg IsEmailMemberOfOrganizationParams) (bool, error)
 	// DashboardService::lastSevenDays — 3h windows over the last 7 days
 	LastSevenDaysWindows(ctx context.Context, arg LastSevenDaysWindowsParams) ([]LastSevenDaysWindowsRow, error)
@@ -128,6 +139,10 @@ type Querier interface {
 	ListGoalsPaginated(ctx context.Context, arg ListGoalsPaginatedParams) ([]ListGoalsPaginatedRow, error)
 	// Invitations -------------------------------------------------------------
 	ListInvitationsPaginated(ctx context.Context, arg ListInvitationsPaginatedParams) ([]OrganizationInvitation, error)
+	ListInvoiceItems(ctx context.Context, invoiceID pgtype.UUID) ([]InvoiceItem, error)
+	// Invoicing queries (phase 7). tock-owned tables.
+	ListInvoiceRecipients(ctx context.Context, organizationID pgtype.UUID) ([]ListInvoiceRecipientsRow, error)
+	ListInvoicesPaginated(ctx context.Context, arg ListInvoicesPaginatedParams) ([]ListInvoicesPaginatedRow, error)
 	ListMembersForOrg(ctx context.Context, organizationID pgtype.UUID) ([]ListMembersForOrgRow, error)
 	ListMembersPaginated(ctx context.Context, arg ListMembersPaginatedParams) ([]ListMembersPaginatedRow, error)
 	ListProjectMembersPaginated(ctx context.Context, arg ListProjectMembersPaginatedParams) ([]ProjectMember, error)
@@ -187,6 +202,8 @@ type Querier interface {
 	UpdateClient(ctx context.Context, arg UpdateClientParams) (Client, error)
 	UpdateGoal(ctx context.Context, arg UpdateGoalParams) error
 	UpdateGoalFilters(ctx context.Context, arg UpdateGoalFiltersParams) error
+	UpdateInvoice(ctx context.Context, arg UpdateInvoiceParams) error
+	UpdateInvoiceRecipient(ctx context.Context, arg UpdateInvoiceRecipientParams) error
 	UpdateMemberBillableRate(ctx context.Context, arg UpdateMemberBillableRateParams) error
 	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error
 	UpdateMemberUser(ctx context.Context, arg UpdateMemberUserParams) error
@@ -200,6 +217,7 @@ type Querier interface {
 	UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams) (TimeEntry, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
+	UpsertInvoiceSettings(ctx context.Context, arg UpsertInvoiceSettingsParams) (InvoiceSetting, error)
 	UpsertPasswordReset(ctx context.Context, arg UpsertPasswordResetParams) error
 	UpsertSession(ctx context.Context, arg UpsertSessionParams) error
 	UserWithEmailExists(ctx context.Context, arg UserWithEmailExistsParams) (bool, error)

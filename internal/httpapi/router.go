@@ -142,6 +142,27 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Put("/organizations/{organization}/goals/{goal}", srv.handleUpdateGoal)
 				r.Delete("/organizations/{organization}/goals/{goal}", srv.handleDeleteGoal)
 
+				// Invoicing (phase 7) — tock-owned surface described by the SPA
+				// client's generated spec.
+				r.Get("/organizations/{organization}/invoice-settings", srv.handleShowInvoiceSettings)
+				r.Put("/organizations/{organization}/invoice-settings", srv.handleUpdateInvoiceSettings)
+
+				r.Get("/organizations/{organization}/invoice-recipients", srv.handleListInvoiceRecipients)
+				r.Post("/organizations/{organization}/invoice-recipients", srv.handleStoreInvoiceRecipient)
+				r.Get("/organizations/{organization}/invoice-recipients/{invoiceRecipient}", srv.handleShowInvoiceRecipient)
+				r.Put("/organizations/{organization}/invoice-recipients/{invoiceRecipient}", srv.handleUpdateInvoiceRecipient)
+				r.Delete("/organizations/{organization}/invoice-recipients/{invoiceRecipient}", srv.handleDestroyInvoiceRecipient)
+				r.Post("/organizations/{organization}/invoice-recipients/{invoiceRecipient}/duplicate", srv.handleDuplicateInvoiceRecipient)
+
+				r.Get("/organizations/{organization}/invoices", srv.handleListInvoices)
+				r.Post("/organizations/{organization}/invoices", srv.handleStoreInvoice)
+				r.Get("/organizations/{organization}/invoices/{invoice}", srv.handleShowInvoice)
+				r.Put("/organizations/{organization}/invoices/{invoice}", srv.handleUpdateInvoice)
+				r.Delete("/organizations/{organization}/invoices/{invoice}", srv.handleDestroyInvoice)
+				r.Post("/organizations/{organization}/invoices/{invoice}/copy", srv.handleCopyInvoice)
+				r.Post("/organizations/{organization}/invoices/{invoice}/download", srv.handleDownloadInvoice)
+				r.Post("/organizations/{organization}/invoices/{invoice}/download-e-invoice", srv.handleDownloadEInvoice)
+
 				// Time entries — order matters: literal segments before {timeEntry}.
 				r.Get("/organizations/{organization}/time-entries", srv.handleListTimeEntries)
 				r.Get("/organizations/{organization}/time-entries/export", srv.handleExportTimeEntries)
