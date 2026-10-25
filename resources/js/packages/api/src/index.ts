@@ -148,6 +148,11 @@ export type UpdateUserBody = ZodiosBodyByAlias<SolidTimeApi, 'updateUser'>;
 export type DeleteUserBody = ZodiosBodyByAlias<SolidTimeApi, 'deleteUser'>;
 export type DeleteOrganizationBody = ZodiosBodyByAlias<SolidTimeApi, 'deleteOrganization'>;
 
+// Audit log (tock-owned, hand-added until it lands in the generated spec).
+export type AuditIndexResponse = ZodiosResponseByAlias<SolidTimeApi, 'getAudits'>;
+export type Audit = AuditIndexResponse['data'][0];
+export type GetAuditResponse = ZodiosResponseByAlias<SolidTimeApi, 'getAudit'>;
+
 const api = createApiClient('/api', { validate: 'none' });
 
 export { createApiClient, api };

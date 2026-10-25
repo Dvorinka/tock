@@ -17,6 +17,7 @@ import {
     UserGroupIcon,
     XMarkIcon,
     DocumentTextIcon,
+    ShieldCheckIcon,
     TableCellsIcon,
 } from '@heroicons/vue/20/solid';
 import { PanelLeft, Target } from '@lucide/vue';
@@ -30,6 +31,7 @@ import { useCurrentTimeEntryStore } from '@/utils/useCurrentTimeEntry';
 import {
     canManageBilling,
     canUpdateOrganization,
+    canViewAudits,
     canViewClients,
     canViewGoals,
     canViewInvoices,
@@ -296,6 +298,12 @@ const page = usePage<{
                                 title="Billing"
                                 :icon="CreditCardIcon"
                                 href="/billing"></NavigationSidebarItem>
+                            <NavigationSidebarItem
+                                v-if="canViewAudits()"
+                                title="Audit log"
+                                :icon="ShieldCheckIcon"
+                                :current="page.url.startsWith('/audit-log')"
+                                href="/audit-log"></NavigationSidebarItem>
                             <NavigationSidebarItem
                                 v-if="canUpdateOrganization()"
                                 title="Import / Export"

@@ -696,6 +696,28 @@ const DetailedWithDataReportResource = z
             .passthrough(),
     })
     .passthrough();
+const AuditResource = z
+    .object({
+        id: z.number().int(),
+        actor_type: z.union([z.string(), z.null()]),
+        actor_id: z.union([z.string(), z.null()]),
+        actor_name: z.union([z.string(), z.null()]),
+        event: z.string(),
+        auditable_type: z.string(),
+        auditable_label: z.string(),
+        auditable_id: z.string(),
+        old_values: z.union([z.record(z.any()), z.array(z.any())]),
+        new_values: z.union([z.record(z.any()), z.array(z.any())]),
+        url: z.union([z.string(), z.null()]),
+        ip_address: z.string(),
+        user_agent: z.union([z.string(), z.null()]),
+        tags: z.union([z.string(), z.null()]),
+        owner_user_id: z.union([z.string(), z.null()]),
+        owner_organization_id: z.union([z.string(), z.null()]),
+        created_at: z.string(),
+        updated_at: z.string(),
+    })
+    .passthrough();
 const TagResource = z
     .object({ id: z.string(), name: z.string(), created_at: z.string(), updated_at: z.string() })
     .passthrough();
@@ -5511,6 +5533,156 @@ Please note that the access token is only shown in this response and cannot be r
                 status: 404,
                 description: `Not found`,
                 schema: z.object({ message: z.string() }).passthrough(),
+            },
+        ],
+    },
+    {
+        method: 'get',
+        path: '/v1/organizations/:organization/audits',
+        alias: 'getAudits',
+        requestFormat: 'json',
+        parameters: [
+            {
+                name: 'organization',
+                type: 'Path',
+                schema: z.string(),
+            },
+            {
+                name: 'page',
+                type: 'Query',
+                schema: z.number().int().gte(1).lte(2147483647).optional(),
+            },
+            {
+                name: 'actor',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+            {
+                name: 'model',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+            {
+                name: 'event',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+            {
+                name: 'auditable_id',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+            {
+                name: 'from',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+            {
+                name: 'to',
+                type: 'Query',
+                schema: z.string().optional(),
+            },
+        ],
+        response: z
+            .object({
+                data: z.array(AuditResource),
+                links: z
+                    .object({
+                        first: z.union([z.string(), z.null()]),
+                        last: z.union([z.string(), z.null()]),
+                        prev: z.union([z.string(), z.null()]),
+                        next: z.union([z.string(), z.null()]),
+                    })
+                    .passthrough(),
+                meta: z
+                    .object({
+                        current_page: z.number().int(),
+                        from: z.union([z.number(), z.null()]),
+                        last_page: z.number().int(),
+                        links: z.array(
+                            z
+                                .object({
+                                    url: z.union([z.string(), z.null()]),
+                                    label: z.string(),
+                                    active: z.boolean(),
+                                })
+                                .passthrough()
+                        ),
+                        path: z.union([z.string(), z.null()]),
+                        per_page: z.number().int(),
+                        to: z.union([z.number(), z.null()]),
+                        total: z.number().int(),
+                    })
+                    .passthrough(),
+            })
+            .passthrough(),
+        errors: [
+            {
+                status: 401,
+                description: `Unauthenticated`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 403,
+                description: `Authorization error`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 404,
+                description: `Not found`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 422,
+                description: `Validation error`,
+                schema: z
+                    .object({ message: z.string(), errors: z.record(z.array(z.string())) })
+                    .partial()
+                    .passthrough(),
+            },
+        ],
+    },
+    {
+        method: 'get',
+        path: '/v1/organizations/:organization/audits/:audit',
+        alias: 'getAudit',
+        requestFormat: 'json',
+        parameters: [
+            {
+                name: 'organization',
+                type: 'Path',
+                schema: z.string(),
+            },
+            {
+                name: 'audit',
+                type: 'Path',
+                schema: z.number().int(),
+            },
+        ],
+        response: z.object({ data: AuditResource }).passthrough(),
+        errors: [
+            {
+                status: 401,
+                description: `Unauthenticated`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 403,
+                description: `Authorization error`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 404,
+                description: `Not found`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 422,
+                description: `Validation error`,
+                schema: z
+                    .object({ message: z.string(), errors: z.record(z.array(z.string())) })
+                    .partial()
+                    .passthrough(),
             },
         ],
     },

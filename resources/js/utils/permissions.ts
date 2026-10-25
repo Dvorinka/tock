@@ -13,6 +13,10 @@ function currentUserHasPermission(permission: string) {
     return false;
 }
 
+export function canViewAudits() {
+    return currentUserHasPermission('audits:view');
+}
+
 export function canUpdateOrganization() {
     return currentUserHasPermission('organizations:update');
 }
