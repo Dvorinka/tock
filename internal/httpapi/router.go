@@ -20,6 +20,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// securityHeaders sets baseline browser hardening headers on every
+// response — upstream sends none of these.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // NewRouter builds the HTTP handler for `tock serve`.
 func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	r := chi.NewRouter()
@@ -27,6 +39,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger(cfg.Logger))
+	r.Use(securityHeaders)
 
 	sessions := auth.NewStore(pool, cfg.AppKey)
 	spa := &spaHandler{appURL: cfg.AppURL}
