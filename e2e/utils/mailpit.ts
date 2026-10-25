@@ -117,6 +117,38 @@ export async function waitForEmailCount(
 }
 
 /**
+ * Find the account-verification URL (`/email/verify/{id}/{hash}`) from a Mailpit
+ * email sent to the given address. Retries a few times to allow for email
+ * delivery delay.
+ *
+ * The message may be plain text only (tock sends no HTML part), so both the
+ * HTML and the text body are searched.
+ */
+export async function getEmailVerificationUrl(
+    request: APIRequestContext,
+    recipientEmail: string
+): Promise<string> {
+    let searchResult: { messages: Array<{ ID: string }> } = { messages: [] };
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+        searchResult = await searchEmails(
+            request,
+            `to:${encodeURIComponent(recipientEmail)} subject:"Verify Email Address"`
+        );
+        if (searchResult.messages.length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect(searchResult.messages.length).toBeGreaterThan(0);
+
+    const message = await getMessage(request, searchResult.messages[0].ID);
+    const body = `${message.HTML ?? ''}\n${message.Text ?? ''}`;
+    const verifyUrlMatch = body.match(/(https?:\/\/[^\s"'<>]*\/email\/verify\/[^\s"'<>]+)/);
+    expect(verifyUrlMatch).toBeTruthy();
+
+    return verifyUrlMatch![1].replace(/&amp;/g, '&');
+}
+
+/**
  * Find the email-change verification URL from a Mailpit email sent to the given address.
  * Retries a few times to allow for email delivery delay.
  */

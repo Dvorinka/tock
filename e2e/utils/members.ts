@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test';
 import type { Browser, Page } from '@playwright/test';
 import { PLAYWRIGHT_BASE_URL } from '../../playwright/config';
-import { getInvitationAcceptUrl } from './mailpit';
+import { getEmailVerificationUrl, getInvitationAcceptUrl } from './mailpit';
 import type { TestContext } from './api';
 
 /**
@@ -22,7 +22,14 @@ export async function registerUser(
     await page.getByLabel('Confirm Password').fill('amazingpassword123');
     await page.getByLabel('I agree to the Terms of').click();
     await page.getByRole('button', { name: 'Register' }).click();
-    await page.waitForURL(PLAYWRIGHT_BASE_URL + '/dashboard');
+    // Registration does not verify the email address (upstream
+    // `UserService::createUser($verifyEmail: false)`), so a fresh account lands
+    // on the verification notice; follow the mailed link before continuing.
+    await page.waitForURL((url) => ['/dashboard', '/email/verify'].includes(url.pathname));
+    if (new URL(page.url()).pathname === '/email/verify') {
+        await page.goto(await getEmailVerificationUrl(page.context().request, email));
+    }
+    await page.waitForURL((url) => url.pathname === '/dashboard');
 
     return { page, close: () => context.close() };
 }

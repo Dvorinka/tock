@@ -142,10 +142,10 @@ func (s *Server) handleStoreTag(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	// Upstream returns the plain resource, so the status is 200 (only goals
-	// set 201 explicitly).
+	// A JsonResource wrapping a Model that was just persisted renders with 201
+	// (Laravel ResourceResponse::calculateStatus), same for every create route.
 	s.recordAudit(r, audit.EventCreated, audit.TypeTag, tag.ID, scope.org.ID, pgtype.UUID{}, nil, tagAttrs(tag))
-	writeJSON(w, http.StatusOK, map[string]any{"data": tagResource(tag)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": tagResource(tag)})
 }
 
 func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +315,7 @@ func (s *Server) handleStoreClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeClient, client.ID, scope.org.ID, pgtype.UUID{}, nil, clientAttrs(client))
-	writeJSON(w, http.StatusOK, map[string]any{"data": clientResource(client)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": clientResource(client)})
 }
 
 func (s *Server) handleUpdateClient(w http.ResponseWriter, r *http.Request) {
@@ -582,7 +582,7 @@ func (s *Server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeProject, project.ID, scope.org.ID, pgtype.UUID{}, nil, projectAttrs(project))
-	writeJSON(w, http.StatusOK, map[string]any{"data": projectResource(project, true)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": projectResource(project, true)})
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
@@ -904,7 +904,7 @@ func (s *Server) handleStoreProjectMember(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeProjectMember, pm.ID, scope.org.ID, pgtype.UUID{}, nil, projectMemberAttrs(pm))
-	writeJSON(w, http.StatusOK, map[string]any{"data": projectMemberResource(pm)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": projectMemberResource(pm)})
 }
 
 // scopedProjectMember loads {projectMember} and verifies it belongs to the org
@@ -1203,7 +1203,7 @@ func (s *Server) handleStoreTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeTask, task.ID, scope.org.ID, pgtype.UUID{}, nil, taskAttrs(task))
-	writeJSON(w, http.StatusOK, map[string]any{"data": taskResource(task)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": taskResource(task)})
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {

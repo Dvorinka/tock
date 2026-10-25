@@ -387,7 +387,7 @@ func (s *Server) handleStoreOrganization(w http.ResponseWriter, r *http.Request)
 	_ = s.domain.SwitchCurrentOrganization(r.Context(), q, uid, org.ID)
 	// Organization audits are owned by the organization itself.
 	s.recordAudit(r, audit.EventCreated, audit.TypeOrganization, org.ID, org.ID, pgtype.UUID{}, nil, organizationAttrs(org))
-	writeJSON(w, http.StatusOK, map[string]any{"data": organizationResource(org, true)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": organizationResource(org, true)})
 }
 
 func (s *Server) handleDestroyOrganization(w http.ResponseWriter, r *http.Request) {

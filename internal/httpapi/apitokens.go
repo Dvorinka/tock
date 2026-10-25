@@ -130,7 +130,7 @@ func (s *Server) handleStoreAPIToken(w http.ResponseWriter, r *http.Request) {
 	}
 	resource := row.resource()
 	resource["access_token"] = accessToken
-	writeJSON(w, http.StatusOK, map[string]any{"data": resource})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": resource})
 }
 
 // handleRevokeAPIToken: POST /api/v1/users/me/api-tokens/{apiToken}/revoke

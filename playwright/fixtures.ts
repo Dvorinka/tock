@@ -6,6 +6,7 @@ import { PLAYWRIGHT_BASE_URL, TEST_USER_PASSWORD } from './config';
 import { type TestContext, setupTestContext } from '../e2e/utils/api';
 import { setupAdminUser, setupEmployeeUser } from '../e2e/utils/members';
 import { loginAsSuperAdmin } from '../e2e/utils/admin';
+import { getEmailVerificationUrl } from '../e2e/utils/mailpit';
 
 export * from '@playwright/test';
 export type { TestContext };
@@ -18,6 +19,30 @@ export interface EmployeeFixture {
 export interface AdminFixture {
     page: Page;
     memberId: string;
+}
+
+/**
+ * Complete the email verification flow for a freshly registered user.
+ *
+ * Registration never marks the email as verified (upstream
+ * `UserService::createUser($verifyEmail: false)`), while every authed web route
+ * sits behind the `verified` middleware, so tests must click the link from the
+ * verification mail before they can reach the app.
+ *
+ * If the environment has no SMTP sink configured the mail never arrives; log it
+ * and continue so the failure surfaces where the test actually needs the app.
+ */
+async function verifyRegisteredEmail(page: Page, email: string): Promise<void> {
+    let verifyUrl: string;
+    try {
+        verifyUrl = await getEmailVerificationUrl(page.context().request, email);
+    } catch {
+        console.warn(`No verification email found for ${email}, continuing unverified`);
+        return;
+    }
+
+    await page.goto(verifyUrl);
+    await page.waitForLoadState('domcontentloaded');
 }
 
 /**
@@ -89,8 +114,10 @@ export const test = baseTest.extend<
             await page.getByRole('button', { name: 'Register' }).click();
             await page.waitForURL(`${PLAYWRIGHT_BASE_URL}/dashboard`);
         } else {
-            // Registration succeeded - cookies are already set in the context from the request
-            // Just navigate to dashboard to verify
+            // Registration succeeded - cookies are already set in the context from the request.
+            // Registered users start unverified, so follow the mailed verification link
+            // before navigating into the app.
+            await verifyRegisteredEmail(page, email);
             await page.goto(`${PLAYWRIGHT_BASE_URL}/dashboard`);
             await page.waitForLoadState('domcontentloaded');
         }

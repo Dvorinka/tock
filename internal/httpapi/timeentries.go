@@ -510,7 +510,7 @@ func (s *Server) handleStoreTimeEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, nil, timeEntryAttrs(entry))
-	writeJSON(w, http.StatusOK, map[string]any{"data": timeEntryResource(entry)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": timeEntryResource(entry)})
 }
 
 // teVals is the validated payload shared by store/update.

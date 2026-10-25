@@ -67,11 +67,12 @@ func absoluteURL(r *http.Request) string {
 	return scheme + "://" + r.Host + r.URL.RequestURI()
 }
 
-// Redirect mirrors inertia-laravel: 303 for non-GET so the browser follows
-// with GET; 302 for plain GET redirects.
+// Redirect mirrors inertia-laravel: PUT/PATCH/DELETE redirects become 303 so
+// the browser follows with GET, everything else stays 302 like plain Laravel.
 func Redirect(w http.ResponseWriter, r *http.Request, url string) {
 	code := http.StatusFound
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch, http.MethodDelete:
 		code = http.StatusSeeOther
 	}
 	http.Redirect(w, r, url, code)
