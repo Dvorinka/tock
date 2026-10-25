@@ -31,7 +31,7 @@ func TestUsersMeRequiresAuth(t *testing.T) {
 }
 
 func TestApiFallbackReturns404JSON(t *testing.T) {
-	for _, path := range []string{"/api", "/api/v1/nonexistent", "/api/v1/users/me/api-tokens"} {
+	for _, path := range []string{"/api", "/api/v1/nonexistent", "/api/v1/users/me/nonexistent"} {
 		rec := httptest.NewRecorder()
 		testRouter().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 

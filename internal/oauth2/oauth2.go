@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Dvorinka/tock/internal/auth"
@@ -119,6 +120,43 @@ func (s *Server) issueToken(ctx context.Context, userID, clientID string, name *
 	return signed, refreshID, nil
 }
 
+// IssuePersonalAccessToken ports Passport's createToken for the personal
+// access client: scopes are ['*'], the token has no expiry and there is no
+// refresh token. Returns the token ID and the bearer string.
+func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name string) (string, string, error) {
+	var clientID string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT id FROM oauth_clients WHERE grant_types LIKE '%personal_access%' AND revoked = false LIMIT 1`).Scan(&clientID); err != nil {
+		return "", "", fmt.Errorf("no personal access client: %w", err)
+	}
+
+	jti := auth.RandomID(40)
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"aud":    clientID,
+		"jti":    jti,
+		"iat":    now.Unix(),
+		"nbf":    now.Unix(),
+		"sub":    userID,
+		"scopes": []string{"*"},
+	}
+	// No exp claim: personal access tokens do not expire, matching Passport.
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = s.kid
+	signed, err := tok.SignedString(s.priv)
+	if err != nil {
+		return "", "", fmt.Errorf("sign access token: %w", err)
+	}
+	scopesJSON, _ := json.Marshal([]string{"*"})
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_access_tokens (id, user_id, client_id, name, scopes, revoked, created_at, updated_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, false, now(), now(), NULL)`,
+		jti, userID, clientID, name, string(scopesJSON)); err != nil {
+		return "", "", fmt.Errorf("insert access token: %w", err)
+	}
+	return jti, signed, nil
+}
+
 // AuthenticateAPI validates a Bearer JWT and returns the owning user ID.
 func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
 	h := r.Header.Get("Authorization")
@@ -141,10 +179,15 @@ func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
 	jti, _ := claims["jti"].(string)
 	sub, _ := claims["sub"].(string)
 	var revoked bool
-	var expiresAt time.Time
+	var expiresAt pgtype.Timestamp
 	err = s.pool.QueryRow(r.Context(),
 		`SELECT revoked, expires_at FROM oauth_access_tokens WHERE id = $1`, jti).Scan(&revoked, &expiresAt)
-	if err != nil || revoked || time.Now().After(expiresAt) {
+	if err != nil || revoked {
+		return "", errors.New("token revoked or expired")
+	}
+	// Personal access tokens carry no expiry (Passport only sets one for
+	// OAuth-issued tokens), so a NULL expires_at never expires.
+	if expiresAt.Valid && time.Now().After(expiresAt.Time) {
 		return "", errors.New("token revoked or expired")
 	}
 	return sub, nil

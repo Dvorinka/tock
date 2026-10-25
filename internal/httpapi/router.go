@@ -75,6 +75,11 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/users/{user}/reset-pending-email", srv.handleResetPendingEmail)
 				r.Get("/users/me/memberships", srv.handleMyMemberships)
 
+				r.Get("/users/me/api-tokens", srv.handleIndexAPITokens)
+				r.Post("/users/me/api-tokens", srv.handleStoreAPIToken)
+				r.Post("/users/me/api-tokens/{apiToken}/revoke", srv.handleRevokeAPIToken)
+				r.Delete("/users/me/api-tokens/{apiToken}", srv.handleDestroyAPIToken)
+
 				r.Post("/organizations", srv.handleStoreOrganization)
 				r.Get("/organizations/{organization}", srv.handleShowOrganization)
 				r.Put("/organizations/{organization}", srv.handleUpdateOrganization)
