@@ -25,6 +25,7 @@ type viteManifest map[string]struct {
 // with the vite entry tags and the page object in the #app div.
 type spaHandler struct {
 	once      sync.Once
+	appURL    string
 	entryFile string
 	entryCSS  []string
 	version   string

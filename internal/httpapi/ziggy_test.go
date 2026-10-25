@@ -29,6 +29,9 @@ func TestZiggyManifestCoversSPARoutes(t *testing.T) {
 		if route.URI == "" || len(route.Methods) == 0 {
 			t.Fatalf("route %q has no uri or methods: %+v", name, route)
 		}
+		if strings.HasPrefix(route.URI, "/") {
+			t.Fatalf("route %q uri %q must not start with '/' (ziggy joins url+'/'+uri)", name, route.URI)
+		}
 	}
 }
 
@@ -47,8 +50,11 @@ func TestZiggyJSONIsValidConfig(t *testing.T) {
 		URL    string                     `json:"url"`
 		Routes map[string]json.RawMessage `json:"routes"`
 	}
-	if err := json.Unmarshal([]byte(ziggyJS()), &config); err != nil {
+	if err := json.Unmarshal([]byte(ziggyJS("http://example.com")), &config); err != nil {
 		t.Fatalf("ziggy config is not valid JSON: %v", err)
+	}
+	if config.URL != "http://example.com" {
+		t.Fatalf("ziggy url must be the app origin, got %q", config.URL)
 	}
 	if len(config.Routes) != len(spaRouteManifest) {
 		t.Fatalf("expected %d routes, got %d", len(spaRouteManifest), len(config.Routes))

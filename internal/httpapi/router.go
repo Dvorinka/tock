@@ -29,7 +29,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	r.Use(requestLogger(cfg.Logger))
 
 	sessions := auth.NewStore(pool, cfg.AppKey)
-	spa := &spaHandler{}
+	spa := &spaHandler{appURL: cfg.AppURL}
 	oauth, err := oauth2.New(pool,
 		filepath.Join(cfg.OAuthKeyDir, "oauth-private.key"),
 		filepath.Join(cfg.OAuthKeyDir, "oauth-public.key"))
