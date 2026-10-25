@@ -12,7 +12,12 @@ type InvoiceSetting = Awaited<ReturnType<typeof api.getInvoiceSettings>>['data']
  */
 export function useInvoicesQuery(status: Ref<string | undefined>, page: Ref<number>) {
     const query = useQuery({
-        queryKey: computed(() => ['invoices', getCurrentOrganizationId(), status.value, page.value]),
+        queryKey: computed(() => [
+            'invoices',
+            getCurrentOrganizationId(),
+            status.value,
+            page.value,
+        ]),
         queryFn: async () => {
             const organizationId = getCurrentOrganizationId();
             if (!organizationId) throw new Error('No organization');
