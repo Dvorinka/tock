@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Dvorinka/tock/internal/db"
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/domain"
 )
 
@@ -444,6 +445,7 @@ func (s *Server) handleStoreInvoiceRecipient(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeInvoiceRecipient, recipient.ID, scope.org.ID, pgtype.UUID{}, nil, invoiceRecipientAttrs(recipient))
 	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(recipient)})
 }
 
@@ -463,6 +465,7 @@ func (s *Server) handleUpdateInvoiceRecipient(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// The update request requires the same fields as the store request.
+	auditBefore := invoiceRecipientAttrs(current)
 	recipient, ok := s.buildInvoiceRecipient(w, r, scope, body, current)
 	if !ok {
 		return
@@ -489,6 +492,7 @@ func (s *Server) handleUpdateInvoiceRecipient(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeInvoiceRecipient, updated.ID, scope.org.ID, pgtype.UUID{}, auditBefore, invoiceRecipientAttrs(updated))
 	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(updated)})
 }
 
@@ -515,6 +519,7 @@ func (s *Server) handleDuplicateInvoiceRecipient(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeInvoiceRecipient, recipient.ID, scope.org.ID, pgtype.UUID{}, nil, invoiceRecipientAttrs(recipient))
 	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(recipient)})
 }
 
@@ -537,6 +542,7 @@ func (s *Server) handleDestroyInvoiceRecipient(w http.ResponseWriter, r *http.Re
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeInvoiceRecipient, recipient.ID, scope.org.ID, pgtype.UUID{}, invoiceRecipientAttrs(recipient), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -18,6 +18,7 @@ type Querier interface {
 	ClientHasProjects(ctx context.Context, clientID pgtype.UUID) (bool, error)
 	ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 	ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error)
+	CountAudits(ctx context.Context, arg CountAuditsParams) (int64, error)
 	CountClients(ctx context.Context, arg CountClientsParams) (int64, error)
 	CountGoals(ctx context.Context, arg CountGoalsParams) (int64, error)
 	CountInvitations(ctx context.Context, organizationID pgtype.UUID) (int64, error)
@@ -81,6 +82,7 @@ type Querier interface {
 	DescriptorNamesForIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]DescriptorNamesForIDsRow, error)
 	FirstUserOrganization(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	GetAccessToken(ctx context.Context, id string) (OauthAccessToken, error)
+	GetAudit(ctx context.Context, id int64) (GetAuditRow, error)
 	GetClientByID(ctx context.Context, id pgtype.UUID) (Client, error)
 	GetGoalByID(ctx context.Context, id pgtype.UUID) (GetGoalByIDRow, error)
 	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
@@ -111,6 +113,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error)
 	GoalsWithMemberFilter(ctx context.Context, arg GoalsWithMemberFilterParams) ([]GoalsWithMemberFilterRow, error)
 	InsertAccessToken(ctx context.Context, arg InsertAccessTokenParams) error
+	// Audit log queries (phase 8). The audits table itself is upstream baseline.
+	InsertAudit(ctx context.Context, arg InsertAuditParams) (int64, error)
 	InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error
 	InsertClient(ctx context.Context, arg InsertClientParams) (Client, error)
 	InsertGoal(ctx context.Context, arg InsertGoalParams) error
@@ -135,6 +139,7 @@ type Querier interface {
 	LatestTasks(ctx context.Context, arg LatestTasksParams) ([]LatestTasksRow, error)
 	LatestTeamActivity(ctx context.Context, organizationID pgtype.UUID) ([]LatestTeamActivityRow, error)
 	ListAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]OauthAccessToken, error)
+	ListAuditsPaginated(ctx context.Context, arg ListAuditsPaginatedParams) ([]ListAuditsPaginatedRow, error)
 	ListClientsPaginated(ctx context.Context, arg ListClientsPaginatedParams) ([]Client, error)
 	ListGoalsPaginated(ctx context.Context, arg ListGoalsPaginatedParams) ([]ListGoalsPaginatedRow, error)
 	// Invitations -------------------------------------------------------------

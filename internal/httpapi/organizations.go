@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
@@ -259,6 +260,7 @@ func (s *Server) handleUpdateOrganization(w http.ResponseWriter, r *http.Request
 		return
 	}
 	org := scope.org
+	auditBefore := organizationAttrs(scope.org)
 	body, ok := decodeJSONMap(r)
 	if !ok {
 		validationErr(w, map[string][]string{"name": {"The given data was invalid."}})
@@ -351,6 +353,7 @@ func (s *Server) handleUpdateOrganization(w http.ResponseWriter, r *http.Request
 			OrganizationID: org.ID, BillableRate: org.BillableRate,
 		})
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeOrganization, org.ID, scope.org.ID, pgtype.UUID{}, auditBefore, organizationAttrs(org))
 	writeJSON(w, http.StatusOK, map[string]any{"data": organizationResource(org, true)})
 }
 
@@ -382,6 +385,8 @@ func (s *Server) handleStoreOrganization(w http.ResponseWriter, r *http.Request)
 	}
 	q := db.New(s.pool)
 	_ = s.domain.SwitchCurrentOrganization(r.Context(), q, uid, org.ID)
+	// Organization audits are owned by the organization itself.
+	s.recordAudit(r, audit.EventCreated, audit.TypeOrganization, org.ID, org.ID, pgtype.UUID{}, nil, organizationAttrs(org))
 	writeJSON(w, http.StatusOK, map[string]any{"data": organizationResource(org, true)})
 }
 
@@ -599,6 +604,7 @@ func (s *Server) handleUpdateMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	auditBefore := memberAttrs(member)
 	body, ok := decodeJSONMap(r)
 	if !ok {
 		writeMessage(w, http.StatusBadRequest, "invalid body")
@@ -668,6 +674,7 @@ func (s *Server) handleUpdateMember(w http.ResponseWriter, r *http.Request) {
 		BillableRate: member.BillableRate, UserName: name, UserEmail: email,
 		UserIsPlaceholder: isPlaceholder,
 	})
+	s.recordAudit(r, audit.EventUpdated, audit.TypeMember, member.ID, scope.org.ID, pgtype.UUID{}, auditBefore, memberAttrs(member))
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
@@ -700,6 +707,7 @@ func (s *Server) handleDestroyMember(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeMember, member.ID, scope.org.ID, pgtype.UUID{}, memberAttrs(member), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -881,6 +889,7 @@ func (s *Server) handleStoreInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sendInvitationMail(r, inv, scope.org)
+	s.recordAudit(r, audit.EventCreated, audit.TypeOrganizationInvitation, inv.ID, scope.org.ID, pgtype.UUID{}, nil, invitationAttrs(inv))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -910,6 +919,7 @@ func (s *Server) handleDestroyInvitation(w http.ResponseWriter, r *http.Request)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeOrganizationInvitation, inv.ID, scope.org.ID, pgtype.UUID{}, invitationAttrs(inv), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

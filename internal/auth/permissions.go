@@ -22,6 +22,7 @@ var rolePermissions = map[string][]string{
 		"invoices:view", "invoices:create", "invoices:update", "invoices:download", "invoices:delete",
 		"invoice-recipients:view", "invoice-recipients:create", "invoice-recipients:update", "invoice-recipients:delete",
 		"invoice-settings:view", "invoice-settings:update",
+		"audits:view",
 	},
 	"admin": {
 		"charts:view:own", "charts:view:all",
@@ -42,6 +43,7 @@ var rolePermissions = map[string][]string{
 		"invoices:view", "invoices:create", "invoices:update", "invoices:download", "invoices:delete",
 		"invoice-recipients:view", "invoice-recipients:create", "invoice-recipients:update", "invoice-recipients:delete",
 		"invoice-settings:view", "invoice-settings:update",
+		"audits:view",
 	},
 	"manager": {
 		"charts:view:own", "charts:view:all",

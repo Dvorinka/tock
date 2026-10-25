@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
@@ -143,6 +144,7 @@ func (s *Server) handleStoreTag(w http.ResponseWriter, r *http.Request) {
 	}
 	// Upstream returns the plain resource, so the status is 200 (only goals
 	// set 201 explicitly).
+	s.recordAudit(r, audit.EventCreated, audit.TypeTag, tag.ID, scope.org.ID, pgtype.UUID{}, nil, tagAttrs(tag))
 	writeJSON(w, http.StatusOK, map[string]any{"data": tagResource(tag)})
 }
 
@@ -172,11 +174,13 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		uniqueNameErr(w, "name", "A tag with the same name already exists in the organization.")
 		return
 	}
+	auditBefore := tagAttrs(tag)
 	tag, err := db.New(s.pool).UpdateTagName(r.Context(), db.UpdateTagNameParams{ID: tag.ID, Name: name})
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeTag, tag.ID, scope.org.ID, pgtype.UUID{}, auditBefore, tagAttrs(tag))
 	writeJSON(w, http.StatusOK, map[string]any{"data": tagResource(tag)})
 }
 
@@ -204,6 +208,7 @@ func (s *Server) handleDestroyTag(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeTag, tag.ID, scope.org.ID, pgtype.UUID{}, tagAttrs(tag), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -309,6 +314,7 @@ func (s *Server) handleStoreClient(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeClient, client.ID, scope.org.ID, pgtype.UUID{}, nil, clientAttrs(client))
 	writeJSON(w, http.StatusOK, map[string]any{"data": clientResource(client)})
 }
 
@@ -351,6 +357,7 @@ func (s *Server) handleUpdateClient(w http.ResponseWriter, r *http.Request) {
 			archived = pgtype.Timestamp{}
 		}
 	}
+	auditBefore := clientAttrs(client)
 	client, err := db.New(s.pool).UpdateClient(r.Context(), db.UpdateClientParams{
 		ID: client.ID, Name: name, ArchivedAt: archived,
 	})
@@ -358,6 +365,7 @@ func (s *Server) handleUpdateClient(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeClient, client.ID, scope.org.ID, pgtype.UUID{}, auditBefore, clientAttrs(client))
 	writeJSON(w, http.StatusOK, map[string]any{"data": clientResource(client)})
 }
 
@@ -383,6 +391,7 @@ func (s *Server) handleDestroyClient(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeClient, client.ID, scope.org.ID, pgtype.UUID{}, clientAttrs(client), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -572,6 +581,7 @@ func (s *Server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeProject, project.ID, scope.org.ID, pgtype.UUID{}, nil, projectAttrs(project))
 	writeJSON(w, http.StatusOK, map[string]any{"data": projectResource(project, true)})
 }
 
@@ -681,6 +691,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	q := db.New(s.pool).WithTx(tx)
+	auditBefore := projectAttrs(project)
 	project, err = q.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID: project.ID, Name: project.Name, Color: project.Color,
 		BillableRate: project.BillableRate, IsPublic: project.IsPublic,
@@ -713,6 +724,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeProject, project.ID, scope.org.ID, pgtype.UUID{}, auditBefore, projectAttrs(project))
 	writeJSON(w, http.StatusOK, map[string]any{"data": projectResource(project, true)})
 }
 
@@ -763,6 +775,7 @@ func (s *Server) handleDestroyProject(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeProject, project.ID, scope.org.ID, pgtype.UUID{}, projectAttrs(project), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -890,6 +903,7 @@ func (s *Server) handleStoreProjectMember(w http.ResponseWriter, r *http.Request
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeProjectMember, pm.ID, scope.org.ID, pgtype.UUID{}, nil, projectMemberAttrs(pm))
 	writeJSON(w, http.StatusOK, map[string]any{"data": projectMemberResource(pm)})
 }
 
@@ -933,6 +947,7 @@ func (s *Server) handleUpdateProjectMember(w http.ResponseWriter, r *http.Reques
 		validationErr(w, map[string][]string{"billable_rate": {"The billable rate must be an integer."}})
 		return
 	}
+	auditBefore := projectMemberRowAttrs(row)
 	oldRate := row.BillableRate
 	tx, err := s.pool.Begin(r.Context())
 	if err != nil {
@@ -962,6 +977,7 @@ func (s *Server) handleUpdateProjectMember(w http.ResponseWriter, r *http.Reques
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeProjectMember, pm.ID, scope.org.ID, pgtype.UUID{}, auditBefore, projectMemberAttrs(pm))
 	writeJSON(w, http.StatusOK, map[string]any{"data": projectMemberResource(pm)})
 }
 
@@ -1021,6 +1037,7 @@ func (s *Server) handleDestroyProjectMember(w http.ResponseWriter, r *http.Reque
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeProjectMember, row.ID, scope.org.ID, pgtype.UUID{}, projectMemberRowAttrs(row), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1185,6 +1202,7 @@ func (s *Server) handleStoreTask(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeTask, task.ID, scope.org.ID, pgtype.UUID{}, nil, taskAttrs(task))
 	writeJSON(w, http.StatusOK, map[string]any{"data": taskResource(task)})
 }
 
@@ -1243,6 +1261,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	if _, has := body["estimated_time"]; has {
 		task.EstimatedTime = estimated
 	}
+	auditBefore := taskAttrs(task)
 	task, err := db.New(s.pool).UpdateTask(r.Context(), db.UpdateTaskParams{
 		ID: task.ID, Name: name, DoneAt: doneAt, EstimatedTime: task.EstimatedTime,
 	})
@@ -1250,6 +1269,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeTask, task.ID, scope.org.ID, pgtype.UUID{}, auditBefore, taskAttrs(task))
 	writeJSON(w, http.StatusOK, map[string]any{"data": taskResource(task)})
 }
 
@@ -1280,5 +1300,6 @@ func (s *Server) handleDestroyTask(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeTask, task.ID, scope.org.ID, pgtype.UUID{}, taskAttrs(task), nil)
 	w.WriteHeader(http.StatusNoContent)
 }

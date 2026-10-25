@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/domain"
 )
@@ -131,6 +133,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusForbidden, "This action is unauthorized.")
 		return
 	}
+	auditBefore := authUserAttrs(*u)
 	var body struct {
 		Name                  string `json:"name"`
 		Email                 string `json:"email"`
@@ -193,6 +196,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = body.Name, body.Timezone, body.WeekStart, pending
 	u.SendStillRunningEmail = sendMail
+	s.recordAudit(r, audit.EventUpdated, audit.TypeUser, uuidOrZero(u.ID), pgtype.UUID{}, uuidOrZero(u.ID), auditBefore, authUserAttrs(*u))
 	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
 }
 

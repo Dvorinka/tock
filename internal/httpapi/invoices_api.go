@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Dvorinka/tock/internal/db"
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/domain"
 )
 
@@ -494,6 +495,7 @@ func (s *Server) handleStoreInvoice(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeInvoice, invoiceRecordFromGet(saved).ID, scope.org.ID, pgtype.UUID{}, nil, invoiceAttrs(invoiceRecordFromGet(saved)))
 	s.writeInvoiceDetail(w, r, invoiceRecordFromGet(saved))
 }
 
@@ -583,6 +585,7 @@ func (s *Server) handleUpdateInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	invoice.ID = current.ID
+	auditBefore := invoiceAttrs(current)
 	if err := db.New(s.pool).UpdateInvoice(r.Context(), db.UpdateInvoiceParams{
 		ID:                    invoice.ID,
 		InvoiceRecipientID:    invoice.InvoiceRecipientID,
@@ -634,6 +637,7 @@ func (s *Server) handleUpdateInvoice(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeInvoice, invoiceRecordFromGet(saved).ID, scope.org.ID, pgtype.UUID{}, auditBefore, invoiceAttrs(invoiceRecordFromGet(saved)))
 	s.writeInvoiceDetail(w, r, invoiceRecordFromGet(saved))
 }
 
@@ -652,6 +656,7 @@ func (s *Server) handleDestroyInvoice(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventDeleted, audit.TypeInvoice, invoice.ID, scope.org.ID, pgtype.UUID{}, invoiceAttrs(invoice), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -732,6 +737,7 @@ func (s *Server) handleCopyInvoice(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeInvoice, invoiceRecordFromGet(saved).ID, scope.org.ID, pgtype.UUID{}, nil, invoiceAttrs(invoiceRecordFromGet(saved)))
 	s.writeInvoiceDetail(w, r, invoiceRecordFromGet(saved))
 }
 

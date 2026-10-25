@@ -163,6 +163,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/organizations/{organization}/invoices/{invoice}/download", srv.handleDownloadInvoice)
 				r.Post("/organizations/{organization}/invoices/{invoice}/download-e-invoice", srv.handleDownloadEInvoice)
 
+				r.Get("/organizations/{organization}/audits", srv.handleListAudits)
+				r.Get("/organizations/{organization}/audits/{audit}", srv.handleShowAudit)
+
 				// Time entries — order matters: literal segments before {timeEntry}.
 				r.Get("/organizations/{organization}/time-entries", srv.handleListTimeEntries)
 				r.Get("/organizations/{organization}/time-entries/export", srv.handleExportTimeEntries)

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Dvorinka/tock/internal/audit"
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
@@ -508,6 +509,7 @@ func (s *Server) handleStoreTimeEntry(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	s.recordAudit(r, audit.EventCreated, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, nil, timeEntryAttrs(entry))
 	writeJSON(w, http.StatusOK, map[string]any{"data": timeEntryResource(entry)})
 }
 
@@ -839,6 +841,7 @@ func (s *Server) handleUpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditBefore := timeEntryAttrs(entry)
 	oldProject, oldTask := entry.ProjectID, entry.TaskID
 
 	// Apply fields — mirror $timeEntry->fill($request->validated()).
@@ -934,6 +937,7 @@ func (s *Server) handleUpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 	if oldTask != newTask {
 		_ = domain.RecalculateSpentTime(r.Context(), q, pgtype.UUID{}, newTask)
 	}
+	s.recordAudit(r, audit.EventUpdated, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, auditBefore, timeEntryAttrs(entry))
 	writeJSON(w, http.StatusOK, map[string]any{"data": timeEntryResource(entry)})
 }
 
@@ -1169,6 +1173,7 @@ func (s *Server) handleUpdateMultipleTimeEntries(w http.ResponseWriter, r *http.
 			continue
 		}
 
+		auditBefore := timeEntryAttrs(entry)
 		oldProject, oldTask := entry.ProjectID, entry.TaskID
 		if changeStart != nil {
 			entry.Start = ptts(*changeStart)
@@ -1233,6 +1238,7 @@ func (s *Server) handleUpdateMultipleTimeEntries(w http.ResponseWriter, r *http.
 			errList = append(errList, idStr)
 			continue
 		}
+		s.recordAudit(r, audit.EventUpdated, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, auditBefore, timeEntryAttrs(entry))
 		_ = domain.RecalculateSpentTime(r.Context(), q, oldProject, oldTask)
 		if oldProject != entry.ProjectID {
 			_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, pgtype.UUID{})
@@ -1281,6 +1287,7 @@ func (s *Server) handleDestroyTimeEntry(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, entry.TaskID)
+	s.recordAudit(r, audit.EventDeleted, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, timeEntryAttrs(entry), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1333,6 +1340,7 @@ func (s *Server) handleDestroyMultipleTimeEntries(w http.ResponseWriter, r *http
 			errList = append(errList, idStr)
 			continue
 		}
+		s.recordAudit(r, audit.EventDeleted, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, timeEntryAttrs(entry), nil)
 		_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, entry.TaskID)
 		success = append(success, idStr)
 	}
