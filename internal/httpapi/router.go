@@ -39,12 +39,26 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration)
 
 	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
+	// Same-origin SPA calls authenticate with the session cookie instead of a
+	// bearer token (upstream does this via Passport's CreateFreshApiToken);
+	// those mutations must carry the CSRF header.
 	apiAuth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			uid, err := oauth.AuthenticateAPI(r)
 			if err != nil {
-				writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
-				return
+				sess := auth.SessionFromContext(r.Context())
+				if sess == nil || sess.UserID == nil {
+					writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+					return
+				}
+				switch r.Method {
+				case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+					if err := auth.CheckCSRF(r); err != nil {
+						writeMessage(w, http.StatusForbidden, "CSRF token mismatch")
+						return
+					}
+				}
+				uid = *sess.UserID
 			}
 			u, err := srv.loadUser(r.Context(), uid)
 			if err != nil {
@@ -60,6 +74,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	}
 
 	r.Route("/api", func(r chi.Router) {
+		r.Use(sessions.Middleware(cfg.SecureCookies))
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/currencies", srv.handleCurrencies)
 			r.Get("/time-zones", srv.handleTimeZones)
@@ -291,6 +306,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.With(srv.requireVerified).Get("/clients", srv.renderPage("Clients"))
 			r.With(srv.requireVerified).Get("/members", srv.handleMembersPage)
 			r.With(srv.requireVerified).Get("/tags", srv.renderPage("Tags"))
+			r.With(srv.requireVerified).Get("/audit-log", srv.renderPage("AuditLog"))
 			r.With(srv.requireVerified).Get("/import", srv.renderPage("Import"))
 			r.With(srv.requireVerified).Get("/organizations/create", srv.handleTeamCreatePage)
 			r.With(srv.requireVerified).Get("/organizations/{organizationId}", srv.handleTeamShowPage)

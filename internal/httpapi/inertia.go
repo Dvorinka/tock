@@ -46,7 +46,7 @@ func (s *spaHandler) Render(w http.ResponseWriter, r *http.Request, component st
 	var out strings.Builder
 	err = shellTemplate.Execute(&out, map[string]any{
 		"Title":  "tock",
-		"Ziggy":  ziggyJS,
+		"Ziggy":  ziggyJS(),
 		"Script": s.entryFile,
 		"Styles": s.entryCSS,
 		"Page":   string(pageJSON),
@@ -106,7 +106,7 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 		"permissions": []string{},
 	}
 	if user != nil {
-		authProps["user"] = map[string]any{
+		userProps := map[string]any{
 			"id":                                  user.ID,
 			"name":                                user.Name,
 			"email":                               user.Email,
@@ -118,6 +118,21 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 			"send_time_entry_still_running_email": user.SendStillRunningEmail,
 			"two_factor_enabled":                  user.TwoFactorSecret != nil && user.TwoFactorConfirmedAt != nil,
 		}
+		// all_teams/current_team mirror Jetstream; the layout and the
+		// organization switcher read the current role from them.
+		if teams, ok := r.Context().Value(ctxTeams).([]map[string]any); ok {
+			userProps["all_teams"] = teams
+			if user.CurrentOrganizationID != nil {
+				userProps["current_team_id"] = *user.CurrentOrganizationID
+				for _, team := range teams {
+					if team["id"] == *user.CurrentOrganizationID {
+						userProps["current_team"] = team
+						break
+					}
+				}
+			}
+		}
+		authProps["user"] = userProps
 		if perms, ok := r.Context().Value(ctxPerms).([]string); ok {
 			authProps["permissions"] = perms
 		}
@@ -139,3 +154,9 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 type permsKey struct{}
 
 var ctxPerms = permsKey{}
+
+// ctxTeams carries the user's organizations (with membership) for the SPA
+// shared props, mirroring Jetstream's `all_teams`.
+type teamsKey struct{}
+
+var ctxTeams = teamsKey{}

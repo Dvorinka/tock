@@ -87,9 +87,9 @@ func (s *Server) webUserMiddleware(next http.Handler) http.Handler {
 		if sess != nil && sess.UserID != nil {
 			if u, err := s.loadUser(r.Context(), *sess.UserID); err == nil {
 				ctx := auth.WithUser(r.Context(), u)
+				var role string
+				var empTasks bool
 				if u.CurrentOrganizationID != nil {
-					var role string
-					var empTasks bool
 					if err := s.pool.QueryRow(ctx, `
 						SELECT m.role, o.employees_can_manage_tasks
 						FROM members m JOIN organizations o ON o.id = m.organization_id
@@ -98,11 +98,66 @@ func (s *Server) webUserMiddleware(next http.Handler) http.Handler {
 						ctx = context.WithValue(ctx, ctxPerms, auth.PermissionsForRole(role, empTasks))
 					}
 				}
+				ctx = context.WithValue(ctx, ctxTeams, s.userTeams(ctx, u.ID))
 				r = r.WithContext(ctx)
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// userTeams returns the user's organizations, each with its membership, in the
+// shape of Jetstream's `all_teams` relation. The SPA reads it for the
+// organization switcher and for the current role.
+func (s *Server) userTeams(ctx context.Context, userID string) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id, o.user_id, o.name, o.personal_team, o.currency,
+		       o.created_at, o.updated_at,
+		       m.id, m.role, m.billable_rate, m.created_at, m.updated_at
+		FROM members m JOIN organizations o ON o.id = m.organization_id
+		WHERE m.user_id = $1
+		ORDER BY o.created_at`, userID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	teams := []map[string]any{}
+	for rows.Next() {
+		var (
+			orgID, orgUserID, orgName, currency string
+			personalTeam                        bool
+			orgCreated, orgUpdated              *time.Time
+			memberID                            string
+			memberRole                          *string
+			billableRate                        *int32
+			memberCreated, memberUpdated        *time.Time
+		)
+		if err := rows.Scan(&orgID, &orgUserID, &orgName, &personalTeam, &currency,
+			&orgCreated, &orgUpdated,
+			&memberID, &memberRole, &billableRate, &memberCreated, &memberUpdated); err != nil {
+			return nil
+		}
+		teams = append(teams, map[string]any{
+			"id":            orgID,
+			"user_id":       orgUserID,
+			"name":          orgName,
+			"personal_team": personalTeam,
+			"currency":      currency,
+			"created_at":    orgCreated,
+			"updated_at":    orgUpdated,
+			"membership": map[string]any{
+				"id":              memberID,
+				"organization_id": orgID,
+				"user_id":         userID,
+				"role":            memberRole,
+				"billable_rate":   billableRate,
+				"created_at":      memberCreated,
+				"updated_at":      memberUpdated,
+			},
+		})
+	}
+	return teams
 }
 
 // csrfMiddleware guards mutating web requests.

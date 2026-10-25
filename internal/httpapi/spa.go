@@ -65,10 +65,6 @@ var shellTemplate = template.Must(template.New("shell").Parse(`<!DOCTYPE html>
 </html>
 `))
 
-// ziggyJS holds the route config injected like @routes until the real Ziggy
-// manifest endpoint exists (Phase 1).
-var ziggyJS = template.JS(`{"url":"","port":null,"defaults":{},"routes":{}}`) //nolint:gochecknoglobals // shell constant
-
 // inertiaPage is the Inertia protocol page object.
 type inertiaPage struct {
 	Component string         `json:"component"`
