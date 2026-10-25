@@ -6,8 +6,9 @@ set dotenv-load := false
 # the PHP tree is deleted (Phase 9).
 export GOFLAGS := "-mod=mod"
 
-# go packages under node_modules are not ours
-gopkgs := `go list ./... | grep -v /node_modules/`
+# go packages under node_modules are not ours (GOFLAGS is set inline because
+# backticks run before the exported value above takes effect)
+gopkgs := `GOFLAGS=-mod=mod go list ./... | grep -v /node_modules/ | tr "\\n" " "`
 
 # --- development ---
 
