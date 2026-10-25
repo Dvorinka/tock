@@ -130,7 +130,7 @@ export async function getEmailVerificationUrl(
 ): Promise<string> {
     let searchResult: { messages: Array<{ ID: string }> } = { messages: [] };
 
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
         searchResult = await searchEmails(
             request,
             `to:${encodeURIComponent(recipientEmail)} subject:"Verify Email Address"`

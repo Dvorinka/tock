@@ -12,6 +12,7 @@ async function registerNewUser(page, email, password) {
     await page.getByRole('button', { name: 'Register' }).click();
     // Both apps land on the verify-email notice after registration —
     // complete verification via the mailed link before the dashboard.
+    await page.waitForURL('**/email/verify');
     const verifyUrl = await getEmailVerificationUrl(page.context().request, email);
     await page.goto(verifyUrl);
     await expect(page.getByTestId('dashboard_view')).toBeVisible();
