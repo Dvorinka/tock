@@ -974,7 +974,7 @@ func (s *Server) sendInvitationMail(r *http.Request, inv db.OrganizationInvitati
 	body := "You have been invited to join the " + org.Name + " organization!\n\n" +
 		"Accept Invitation: " + url + "\n\n" +
 		"If you did not expect to receive an invitation to this organization, you may discard this email."
-	_ = s.sendMail(inv.Email, "Organization Invitation", body)
+	_ = s.sendMail(r.Context(), inv.Email, "Organization Invitation", body)
 }
 
 // handleAcceptInvitation ports Web\OrganizationInvitationController::accept.

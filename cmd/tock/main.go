@@ -99,6 +99,7 @@ func cmdServe(args []string) error {
 
 	if !*noJobs {
 		worker := jobs.New(pool)
+		worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
 		go func() {
 			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				cfg.Logger.Error("job worker stopped", "error", err)
@@ -179,7 +180,9 @@ func cmdWorker(args []string) error {
 	defer pool.Close()
 
 	cfg.Logger.Info("job worker started")
-	if err := jobs.New(pool).Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	worker := jobs.New(pool)
+	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("worker: %w", err)
 	}
 	return nil
