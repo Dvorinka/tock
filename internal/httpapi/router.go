@@ -307,6 +307,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.With(srv.requireVerified).Get("/members", srv.handleMembersPage)
 			r.With(srv.requireVerified).Get("/tags", srv.renderPage("Tags"))
 			r.With(srv.requireVerified).Get("/audit-log", srv.renderPage("AuditLog"))
+			r.With(srv.requireVerified).Get("/invoices", srv.renderPage("Invoices"))
 			r.With(srv.requireVerified).Get("/import", srv.renderPage("Import"))
 			r.With(srv.requireVerified).Get("/organizations/create", srv.handleTeamCreatePage)
 			r.With(srv.requireVerified).Get("/organizations/{organizationId}", srv.handleTeamShowPage)

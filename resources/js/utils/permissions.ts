@@ -133,6 +133,18 @@ export function canViewAllTimeEntries() {
 export function canViewInvoices() {
     return currentUserHasPermission('invoices:view');
 }
+export function canCreateInvoices() {
+    return currentUserHasPermission('invoices:create');
+}
+export function canUpdateInvoices() {
+    return currentUserHasPermission('invoices:update');
+}
+export function canDeleteInvoices() {
+    return currentUserHasPermission('invoices:delete');
+}
+export function canDownloadInvoices() {
+    return currentUserHasPermission('invoices:download');
+}
 export function canCreateReports() {
     return currentUserHasPermission('reports:create');
 }
