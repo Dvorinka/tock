@@ -134,6 +134,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Put("/organizations/{organization}/reports/{report}", srv.handleUpdateReport)
 				r.Delete("/organizations/{organization}/reports/{report}", srv.handleDeleteReport)
 
+				r.Post("/organizations/{organization}/export", srv.handleExportOrganization)
+
 				r.Get("/organizations/{organization}/goals", srv.handleIndexGoals)
 				r.Get("/organizations/{organization}/goals/{goal}", srv.handleShowGoal)
 				r.Post("/organizations/{organization}/goals", srv.handleStoreGoal)

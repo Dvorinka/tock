@@ -972,6 +972,12 @@ var aggregatePDFTemplate = template.Must(template.New("aggregate").Parse(`<!DOCT
 
 // saveExportFile writes bytes to storageDir/exports and returns the signed URL.
 func (s *Server) saveExportFile(filename string, content []byte) (string, error) {
+	return s.saveExportFileTTL(filename, content, 5*time.Minute)
+}
+
+// saveExportFileTTL is saveExportFile with an explicit link lifetime; the
+// organization export uses upstream's ten minutes.
+func (s *Server) saveExportFileTTL(filename string, content []byte, ttl time.Duration) (string, error) {
 	dir := filepath.Join(s.storageDir, "exports")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -980,7 +986,7 @@ func (s *Server) saveExportFile(filename string, content []byte) (string, error)
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return "", err
 	}
-	expires := time.Now().Add(5 * time.Minute).Unix()
+	expires := time.Now().Add(ttl).Unix()
 	sig := exportSignature(s.appKey, filename, expires)
 	return fmt.Sprintf("%s/exports/%s?expires=%d&signature=%s", s.appURL, filename, expires, sig), nil
 }
