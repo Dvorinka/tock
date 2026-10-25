@@ -451,18 +451,25 @@ func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = decodeBody(r, &body)
 	sess := auth.SessionFromContext(r.Context())
-	if u, err := s.userByEmail(r.Context(), body.Email); err == nil {
-		token := auth.RandomToken(32)
-		sum := sha256.Sum256([]byte(token))
-		_, _ = s.pool.Exec(r.Context(), `
-			INSERT INTO password_reset_tokens (email, token, created_at)
-			VALUES ($1, $2, now())
-			ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
-			u.Email, hex.EncodeToString(sum[:]))
-		link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
-		_ = s.sendMail(r.Context(), u.Email, "Reset Password Notification",
-			"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
+	u, err := s.userByEmail(r.Context(), body.Email)
+	if err != nil {
+		// Upstream Fortify surfaces INVALID_USER on the form instead of a
+		// silent success.
+		backWithErrors(w, r, map[string]string{
+			"email": "We can't find a user with that email address.",
+		}, "/forgot-password")
+		return
 	}
+	token := auth.RandomToken(32)
+	sum := sha256.Sum256([]byte(token))
+	_, _ = s.pool.Exec(r.Context(), `
+		INSERT INTO password_reset_tokens (email, token, created_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
+		u.Email, hex.EncodeToString(sum[:]))
+	link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
+	_ = s.sendMail(r.Context(), u.Email, "Reset Password Notification",
+		"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
 	if sess != nil {
 		sess.Set("status", "We have emailed your password reset link.")
 	}
