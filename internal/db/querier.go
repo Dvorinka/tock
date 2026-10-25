@@ -112,6 +112,19 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error)
 	GoalsWithMemberFilter(ctx context.Context, arg GoalsWithMemberFilterParams) ([]GoalsWithMemberFilterRow, error)
+	ImportInsertClient(ctx context.Context, arg ImportInsertClientParams) (ImportInsertClientRow, error)
+	ImportInsertMember(ctx context.Context, arg ImportInsertMemberParams) (ImportInsertMemberRow, error)
+	ImportInsertTask(ctx context.Context, arg ImportInsertTaskParams) (ImportInsertTaskRow, error)
+	ImportInsertTimeEntry(ctx context.Context, arg ImportInsertTimeEntryParams) (pgtype.UUID, error)
+	ImportInsertUser(ctx context.Context, arg ImportInsertUserParams) (pgtype.UUID, error)
+	ImportListClients(ctx context.Context, organizationID pgtype.UUID) ([]ImportListClientsRow, error)
+	ImportListInvitations(ctx context.Context, organizationID pgtype.UUID) ([]ImportListInvitationsRow, error)
+	ImportListMembers(ctx context.Context, organizationID pgtype.UUID) ([]ImportListMembersRow, error)
+	ImportListProjectMembers(ctx context.Context, organizationID pgtype.UUID) ([]ImportListProjectMembersRow, error)
+	ImportListProjects(ctx context.Context, organizationID pgtype.UUID) ([]ImportListProjectsRow, error)
+	ImportListTags(ctx context.Context, organizationID pgtype.UUID) ([]ImportListTagsRow, error)
+	ImportListTasks(ctx context.Context, organizationID pgtype.UUID) ([]ImportListTasksRow, error)
+	ImportListUsers(ctx context.Context, organizationID pgtype.UUID) ([]ImportListUsersRow, error)
 	InsertAccessToken(ctx context.Context, arg InsertAccessTokenParams) error
 	// Audit log queries (phase 8). The audits table itself is upstream baseline.
 	InsertAudit(ctx context.Context, arg InsertAuditParams) (int64, error)
@@ -204,6 +217,7 @@ type Querier interface {
 	TimeEntriesForChartAggregate(ctx context.Context, arg TimeEntriesForChartAggregateParams) ([]TimeEntriesForChartAggregateRow, error)
 	TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error)
 	TimeEntryExistsWithTag(ctx context.Context, arg TimeEntryExistsWithTagParams) (bool, error)
+	TryImportLock(ctx context.Context, hashtext string) (bool, error)
 	UpdateClient(ctx context.Context, arg UpdateClientParams) (Client, error)
 	UpdateGoal(ctx context.Context, arg UpdateGoalParams) error
 	UpdateGoalFilters(ctx context.Context, arg UpdateGoalFiltersParams) error

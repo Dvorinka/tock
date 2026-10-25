@@ -20,6 +20,7 @@ import (
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
+	"github.com/Dvorinka/tock/internal/importer"
 )
 
 // ---- shared helpers ----
@@ -1080,7 +1081,6 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_ = scope
 	var body struct {
 		Type string `json:"type"`
 		Data string `json:"data"`
@@ -1090,31 +1090,40 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if body.Type == "" {
 		errs["type"] = []string{"The type field is required."}
 	}
-	// config('import.max_data_size')
+	// config('import.max_data_size') = 50 MB on the base64 string.
 	if body.Data == "" {
 		errs["data"] = []string{"The data field is required."}
+	} else if len(body.Data) > 50*1024*1024 {
+		errs["data"] = []string{"The data field must not be greater than 52428800 characters."}
 	}
 	if len(errs) > 0 {
 		validationErr(w, errs)
 		return
 	}
-	if _, err := base64.StdEncoding.DecodeString(body.Data); err != nil {
+	data, err := base64.StdEncoding.DecodeString(body.Data)
+	if err != nil {
 		writeMessage(w, http.StatusBadRequest, "Invalid base64 encoded data")
 		return
 	}
-	known := false
-	for _, imp := range importerInfo {
-		if imp["key"] == body.Type {
-			known = true
-		}
-	}
-	if !known {
+	if !importer.ImporterKeys()[body.Type] {
 		writeMessage(w, http.StatusBadRequest, "Invalid importer type")
 		return
 	}
-	// shortcut: importer engines land in Phase 6 — the surface validates and
-	// reports like upstream's ImportException for now.
-	writeMessage(w, http.StatusBadRequest, "Import failed, please try again later or contact support")
+	tz := "UTC"
+	if u := auth.UserFromContext(r.Context()); u != nil && u.Timezone != "" {
+		tz = u.Timezone
+	}
+	report, err := s.importer.Import(r.Context(), scope.org, body.Type, data, tz)
+	if err != nil {
+		var ie *importer.Error
+		if errors.As(err, &ie) {
+			writeMessage(w, http.StatusBadRequest, ie.Error())
+			return
+		}
+		writeMessage(w, http.StatusBadRequest, "Import failed, please try again later or contact support")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report": report.Map()})
 }
 
 // ---- currencies / timezones (public like upstream) ----

@@ -25,6 +25,7 @@ import (
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
+	"github.com/Dvorinka/tock/internal/importer"
 	"github.com/Dvorinka/tock/internal/oauth2"
 )
 
@@ -34,6 +35,7 @@ type Server struct {
 	sessions      *auth.Store
 	oauth         *oauth2.Server
 	domain        *domain.Service
+	importer      *importer.Service
 	appURL        string
 	appKey        string
 	storageDir    string
@@ -47,6 +49,7 @@ type Server struct {
 func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool) *Server {
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
 		domain: domain.NewService(pool),
+		importer: importer.New(pool, storageDir),
 		appURL: appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
 		gotenbergURL:  gotenbergURL,
 		secureCookies: secure, registration: registration}
