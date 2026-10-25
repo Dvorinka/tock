@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { PLAYWRIGHT_BASE_URL } from '../playwright/config';
-import { getPasswordResetUrl } from './utils/mailpit';
+import { getPasswordResetUrl, getEmailVerificationUrl } from './utils/mailpit';
 
 async function registerNewUser(page, email, password) {
     await page.goto(PLAYWRIGHT_BASE_URL + '/register');
@@ -10,6 +10,10 @@ async function registerNewUser(page, email, password) {
     await page.getByLabel('Confirm Password').fill(password);
     await page.getByLabel('I agree to the Terms of').click();
     await page.getByRole('button', { name: 'Register' }).click();
+    // Both apps land on the verify-email notice after registration —
+    // complete verification via the mailed link before the dashboard.
+    const verifyUrl = await getEmailVerificationUrl(page.context().request, email);
+    await page.goto(verifyUrl);
     await expect(page.getByTestId('dashboard_view')).toBeVisible();
 }
 
