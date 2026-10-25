@@ -15,12 +15,7 @@ import TextareaInput from '@/packages/ui/src/Input/TextareaInput.vue';
 import InputLabel from '@/packages/ui/src/Input/InputLabel.vue';
 import Checkbox from '@/packages/ui/src/Input/Checkbox.vue';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/ui/src';
-import {
-    BanknotesIcon,
-    DocumentDuplicateIcon,
-    PlusIcon,
-    TrashIcon,
-} from '@heroicons/vue/20/solid';
+import { BanknotesIcon, DocumentDuplicateIcon, PlusIcon, TrashIcon } from '@heroicons/vue/20/solid';
 import { computed, reactive, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { api } from '@/packages/api/src';
@@ -48,7 +43,13 @@ import {
     canUpdateInvoices,
 } from '@/utils/permissions';
 
-type EntryForm = { id: string | null; name: string; description: string; price: string; qty: string };
+type EntryForm = {
+    id: string | null;
+    name: string;
+    description: string;
+    price: string;
+    qty: string;
+};
 
 const queryClient = useQueryClient();
 const page = ref(1);
@@ -292,7 +293,6 @@ async function removeInvoice(inv: InvoiceIndexEntry) {
     });
     invalidate();
 }
-
 
 async function downloadInvoice(inv: InvoiceIndexEntry, eInvoice: boolean) {
     const org = getCurrentOrganizationId();
@@ -562,7 +562,9 @@ const firstError = computed(() => {
                             class="py-3.5 pl-4 pr-3 text-left text-xs text-text-tertiary sm:pl-6 lg:pl-8">
                             Reference
                         </div>
-                        <div class="px-3 py-3.5 text-left text-xs text-text-tertiary">Recipient</div>
+                        <div class="px-3 py-3.5 text-left text-xs text-text-tertiary">
+                            Recipient
+                        </div>
                         <div class="px-3 py-3.5 text-left text-xs text-text-tertiary">Date</div>
                         <div class="px-3 py-3.5 text-left text-xs text-text-tertiary">Due</div>
                         <div class="px-3 py-3.5 text-left text-xs text-text-tertiary">Status</div>
@@ -587,7 +589,7 @@ const firstError = computed(() => {
                             <div class="px-3 py-4 text-sm">
                                 <Badge>
                                     <span
-:class="statusBadgeClass(invoice.status)"
+                                        :class="statusBadgeClass(invoice.status)"
                                         class="rounded px-1.5 py-0.5 text-xs">
                                         {{ invoice.status_label || invoice.status }}
                                     </span>
@@ -631,7 +633,9 @@ const firstError = computed(() => {
                         </TableRow>
                     </template>
 
-                    <div v-if="!isLoading && invoices.length === 0" class="col-span-6 py-24 text-center">
+                    <div
+                        v-if="!isLoading && invoices.length === 0"
+                        class="col-span-6 py-24 text-center">
                         <BanknotesIcon class="w-8 text-icon-default inline pb-2"></BanknotesIcon>
                         <h3 class="text-text-primary font-semibold">No invoices yet</h3>
                         <p class="text-text-secondary">
@@ -662,10 +666,7 @@ const firstError = computed(() => {
                                 <SelectValue placeholder="Select recipient" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem
-                                    v-for="r in recipients"
-                                    :key="r.id"
-                                    :value="r.id">
+                                <SelectItem v-for="r in recipients" :key="r.id" :value="r.id">
                                     {{ r.name }}
                                 </SelectItem>
                             </SelectContent>
@@ -1057,9 +1058,7 @@ const firstError = computed(() => {
             </div>
             <template #footer>
                 <SecondaryButton @click="showTimePicker = false">Cancel</SecondaryButton>
-                <PrimaryButton
-                    :disabled="selectedEntryIds.size === 0"
-                    @click="addSelectedEntries">
+                <PrimaryButton :disabled="selectedEntryIds.size === 0" @click="addSelectedEntries">
                     Add {{ selectedEntryIds.size }} line(s)
                 </PrimaryButton>
             </template>
