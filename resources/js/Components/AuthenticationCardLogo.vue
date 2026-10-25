@@ -23,7 +23,9 @@ import { Link } from '@inertiajs/vue3';
                 font-size="21"
                 font-weight="700"
                 letter-spacing="-0.5"
-                class="fill-text-primary">tock</text>
+                class="fill-text-primary">
+                tock
+            </text>
         </svg>
     </Link>
 </template>
