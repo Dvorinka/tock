@@ -222,7 +222,7 @@ test('shows error when registering with existing email', async ({ page }) => {
     await page.getByRole('button', { name: 'Register' }).click();
 
     // Should show error about email already taken
-    await expect(page.getByText('The resource already exists.')).toBeVisible();
+    await expect(page.getByText('has already been taken')).toBeVisible();
 });
 
 test('shows validation error for weak password on registration', async ({ page }) => {
