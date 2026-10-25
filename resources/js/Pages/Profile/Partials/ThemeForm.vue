@@ -14,7 +14,7 @@ const preferredColor = usePreferredColorScheme();
     <FormSection>
         <template #title> Theme</template>
 
-        <template #description> Choose how you want solidtime to look on your device </template>
+        <template #description> Choose how you want tock to look on your device </template>
 
         <template #form>
             <!-- Theme -->

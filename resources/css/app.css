@@ -1,14 +1,11 @@
 /* Import shared solidtime styles from UI package */
 @import '../js/packages/ui/styles.css';
 
-/* Main app specific styles - Inter font */
+/* Main app specific styles - Space Grotesk font */
 @font-face {
-    font-family: 'Inter';
-    src:
-        url('/fonts/InterVariable.woff2') format('woff2'),
-        url('/fonts/InterVariable.ttf') format('truetype');
-    font-weight: 100 900;
+    font-family: 'Space Grotesk';
+    src: url('/fonts/SpaceGrotesk.woff2') format('woff2');
+    font-weight: 300 700;
     font-style: normal;
     font-display: swap;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }

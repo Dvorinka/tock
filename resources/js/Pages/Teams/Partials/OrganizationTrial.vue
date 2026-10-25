@@ -27,7 +27,7 @@ const daysLeftLabel = computed(() => {
     <ActionSection>
         <template #title>Trial</template>
 
-        <template #description>Your organization is trying out solidtime Professional.</template>
+        <template #description>Your organization is trying out tock Professional.</template>
 
         <template #content>
             <div class="max-w-xl text-sm text-text-secondary">
