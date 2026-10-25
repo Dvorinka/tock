@@ -19,6 +19,7 @@ type Config struct {
 	AppKey             string // TOCK_APP_KEY — session/CSRF HMAC key
 	SMTPAddr           string // TOCK_SMTP_ADDR — mailpit in dev
 	OAuthKeyDir        string // TOCK_OAUTH_KEY_DIR — RSA keypair storage
+	StorageDir         string // TOCK_STORAGE_DIR — private disk root (exports)
 	SecureCookies      bool   // TOCK_SECURE_COOKIES
 	Registration       bool   // TOCK_ENABLE_REGISTRATION
 	Logger                     *slog.Logger
@@ -37,6 +38,7 @@ func Load() Config {
 		AppKey:             env("TOCK_APP_KEY", ""),
 		SMTPAddr:           env("TOCK_SMTP_ADDR", "127.0.0.1:1025"),
 		OAuthKeyDir:        env("TOCK_OAUTH_KEY_DIR", "storage"),
+		StorageDir:         env("TOCK_STORAGE_DIR", "storage"),
 		SecureCookies:      env("TOCK_SECURE_COOKIES", "false") == "true",
 		Registration:       env("TOCK_ENABLE_REGISTRATION", "true") == "true",
 	}

@@ -14,11 +14,18 @@ type Querier interface {
 	AcceptedInvitationsForEmail(ctx context.Context, lower string) ([]OrganizationInvitation, error)
 	ClearCurrentTeamForOrg(ctx context.Context, currentTeamID pgtype.UUID) error
 	ClearUserCurrentTeam(ctx context.Context, id pgtype.UUID) error
+	ClientHasProjects(ctx context.Context, clientID pgtype.UUID) (bool, error)
 	ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 	ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error)
+	CountClients(ctx context.Context, arg CountClientsParams) (int64, error)
 	CountInvitations(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountNonPlaceholderMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountProjectMembers(ctx context.Context, projectID pgtype.UUID) (int64, error)
+	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
+	CountRunningTimeEntriesForUser(ctx context.Context, userID pgtype.UUID) (int64, error)
+	CountTags(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	CountUserMemberships(ctx context.Context, userID pgtype.UUID) (int64, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (OrganizationInvitation, error)
 	CreateMember(ctx context.Context, arg CreateMemberParams) error
@@ -26,6 +33,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAccessTokensForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteAuthCodesForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteClient(ctx context.Context, id pgtype.UUID) error
 	DeleteClientsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteGoalsForMember(ctx context.Context, arg DeleteGoalsForMemberParams) error
 	DeleteGoalsForOrg(ctx context.Context, organizationID pgtype.UUID) error
@@ -37,24 +45,34 @@ type Querier interface {
 	DeleteOrganizationRow(ctx context.Context, id pgtype.UUID) error
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) error
 	DeletePasswordReset(ctx context.Context, email string) error
+	DeleteProject(ctx context.Context, id pgtype.UUID) error
+	DeleteProjectMember(ctx context.Context, id pgtype.UUID) error
 	DeleteProjectMembersForMember(ctx context.Context, arg DeleteProjectMembersForMemberParams) error
 	DeleteProjectMembersForMemberUser(ctx context.Context, arg DeleteProjectMembersForMemberUserParams) error
 	DeleteProjectMembersForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteProjectMembersForProject(ctx context.Context, projectID pgtype.UUID) error
 	DeleteProjectsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteReportsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	// Entity reassignment (merge / placeholder transitions) --------------------
 	DeleteRunningTimeEntriesForMember(ctx context.Context, arg DeleteRunningTimeEntriesForMemberParams) error
 	DeleteSession(ctx context.Context, id string) error
+	DeleteTag(ctx context.Context, id pgtype.UUID) error
 	DeleteTagsForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteTask(ctx context.Context, id pgtype.UUID) error
 	DeleteTasksForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteTimeEntriesForMemberUser(ctx context.Context, arg DeleteTimeEntriesForMemberUserParams) error
 	DeleteTimeEntriesForOrg(ctx context.Context, organizationID pgtype.UUID) error
+	DeleteTimeEntry(ctx context.Context, id pgtype.UUID) error
 	DeleteUser(ctx context.Context, id pgtype.UUID) error
 	DeleteUserByID(ctx context.Context, id pgtype.UUID) error
 	DemoteOtherOwners(ctx context.Context, arg DemoteOtherOwnersParams) error
+	// loadDescriptorsMap per type is resolved in Go (per-table lookups); these
+	// four cover client/user/project/task/tag.
+	DescriptorNamesForIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]DescriptorNamesForIDsRow, error)
 	FirstUserOrganization(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	GetAccessToken(ctx context.Context, id string) (OauthAccessToken, error)
+	GetClientByID(ctx context.Context, id pgtype.UUID) (Client, error)
 	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
 	GetMember(ctx context.Context, arg GetMemberParams) (Member, error)
 	// Members -----------------------------------------------------------------
@@ -64,58 +82,113 @@ type Querier interface {
 	GetOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetPasswordReset(ctx context.Context, email string) (PasswordResetToken, error)
 	GetPersonalAccessClient(ctx context.Context) (pgtype.UUID, error)
+	GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error)
+	GetProjectByIDInOrg(ctx context.Context, arg GetProjectByIDInOrgParams) (Project, error)
+	GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (ProjectMember, error)
+	GetProjectMemberByID(ctx context.Context, id pgtype.UUID) (GetProjectMemberByIDRow, error)
 	GetRefreshToken(ctx context.Context, id string) (OauthRefreshToken, error)
 	GetSession(ctx context.Context, id string) (Session, error)
+	GetTagByID(ctx context.Context, id pgtype.UUID) (Tag, error)
+	GetTaskByID(ctx context.Context, id pgtype.UUID) (Task, error)
+	GetTaskByIDInProject(ctx context.Context, arg GetTaskByIDInProjectParams) (Task, error)
+	GetTimeEntryByID(ctx context.Context, id pgtype.UUID) (TimeEntry, error)
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error)
 	GoalsWithMemberFilter(ctx context.Context, arg GoalsWithMemberFilterParams) ([]GoalsWithMemberFilterRow, error)
 	InsertAccessToken(ctx context.Context, arg InsertAccessTokenParams) error
 	InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error
+	InsertClient(ctx context.Context, arg InsertClientParams) (Client, error)
 	// Organizations -----------------------------------------------------------
 	InsertOrganization(ctx context.Context, arg InsertOrganizationParams) (Organization, error)
 	InsertPlaceholderUser(ctx context.Context, arg InsertPlaceholderUserParams) (User, error)
+	InsertProject(ctx context.Context, arg InsertProjectParams) (Project, error)
+	InsertProjectMember(ctx context.Context, arg InsertProjectMemberParams) (ProjectMember, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertTag(ctx context.Context, arg InsertTagParams) (Tag, error)
+	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
+	InsertTimeEntry(ctx context.Context, arg InsertTimeEntryParams) (TimeEntry, error)
 	InvitationExistsForEmail(ctx context.Context, arg InvitationExistsForEmailParams) (bool, error)
 	IsEmailMemberOfOrganization(ctx context.Context, arg IsEmailMemberOfOrganizationParams) (bool, error)
+	// DashboardService::lastSevenDays — 3h windows over the last 7 days
+	LastSevenDaysWindows(ctx context.Context, arg LastSevenDaysWindowsParams) ([]LastSevenDaysWindowsRow, error)
+	LatestTasks(ctx context.Context, arg LatestTasksParams) ([]LatestTasksRow, error)
+	LatestTeamActivity(ctx context.Context, organizationID pgtype.UUID) ([]LatestTeamActivityRow, error)
 	ListAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]OauthAccessToken, error)
+	ListClientsPaginated(ctx context.Context, arg ListClientsPaginatedParams) ([]Client, error)
 	// Invitations -------------------------------------------------------------
 	ListInvitationsPaginated(ctx context.Context, arg ListInvitationsPaginatedParams) ([]OrganizationInvitation, error)
 	ListMembersForOrg(ctx context.Context, organizationID pgtype.UUID) ([]ListMembersForOrgRow, error)
 	ListMembersPaginated(ctx context.Context, arg ListMembersPaginatedParams) ([]ListMembersPaginatedRow, error)
+	ListProjectMembersPaginated(ctx context.Context, arg ListProjectMembersPaginatedParams) ([]ProjectMember, error)
+	ListProjectsPaginated(ctx context.Context, arg ListProjectsPaginatedParams) ([]Project, error)
+	ListTagsPaginated(ctx context.Context, arg ListTagsPaginatedParams) ([]Tag, error)
+	ListTasksPaginated(ctx context.Context, arg ListTasksPaginatedParams) ([]Task, error)
 	// User deletion (DeletionService::deleteUser) -------------------------------
 	ListUserMemberships(ctx context.Context, userID pgtype.UUID) ([]ListUserMembershipsRow, error)
 	MarkInvitationAccepted(ctx context.Context, id pgtype.UUID) error
+	// BillableRateService::getBillableRateForTimeEntry precedence:
+	// project_member > project > member > organization
+	MemberBillableRateForTimeEntry(ctx context.Context, arg MemberBillableRateForTimeEntryParams) (interface{}, error)
 	MemberExistsForUser(ctx context.Context, arg MemberExistsForUserParams) (bool, error)
+	OverlappingTimeEntryExists(ctx context.Context, arg OverlappingTimeEntryExistsParams) (bool, error)
 	PlaceholderMembersByEmail(ctx context.Context, arg PlaceholderMembersByEmailParams) ([]PlaceholderMembersByEmailRow, error)
+	ProjectHasTasks(ctx context.Context, projectID pgtype.UUID) (bool, error)
+	ProjectHasTimeEntries(ctx context.Context, projectID pgtype.UUID) (bool, error)
+	ProjectMemberExists(ctx context.Context, arg ProjectMemberExistsParams) (bool, error)
 	ProjectMembersExistForMemberUser(ctx context.Context, arg ProjectMembersExistForMemberUserParams) (bool, error)
+	ProjectNamesForChart(ctx context.Context, arg ProjectNamesForChartParams) ([]ProjectNamesForChartRow, error)
+	ProjectVisibleToUser(ctx context.Context, arg ProjectVisibleToUserParams) (bool, error)
 	// Billable-rate propagation (BillableRateService) ---------------------------
 	PropagateBillableRateForMember(ctx context.Context, arg PropagateBillableRateForMemberParams) error
 	PropagateBillableRateForOrganization(ctx context.Context, arg PropagateBillableRateForOrganizationParams) error
+	// BillableRateService::updateTimeEntriesBillableRateForProject
+	PropagateBillableRateForProject(ctx context.Context, arg PropagateBillableRateForProjectParams) error
+	// BillableRateService::updateTimeEntriesBillableRateForProjectMember
+	PropagateBillableRateForProjectMember(ctx context.Context, arg PropagateBillableRateForProjectMemberParams) error
 	ReassignGoalsToMember(ctx context.Context, arg ReassignGoalsToMemberParams) error
 	ReassignProjectMembersToMember(ctx context.Context, arg ReassignProjectMembersToMemberParams) error
 	ReassignProjectMembersToUser(ctx context.Context, arg ReassignProjectMembersToUserParams) error
 	ReassignTimeEntriesToMember(ctx context.Context, arg ReassignTimeEntriesToMemberParams) error
 	ReassignTimeEntriesToUser(ctx context.Context, arg ReassignTimeEntriesToUserParams) error
+	RecalculateSpentTimeForProject(ctx context.Context, projectID pgtype.UUID) error
+	RecalculateSpentTimeForTask(ctx context.Context, taskID pgtype.UUID) error
 	RevokeAccessToken(ctx context.Context, id string) error
 	RevokeRefreshByAccessToken(ctx context.Context, accessTokenID string) error
 	RevokeRefreshToken(ctx context.Context, id string) error
+	RunningTimeEntryForUser(ctx context.Context, userID pgtype.UUID) (TimeEntry, error)
 	SetOrganizationOwner(ctx context.Context, arg SetOrganizationOwnerParams) error
 	SetUserCurrentOrganization(ctx context.Context, arg SetUserCurrentOrganizationParams) error
 	SetUserEmailVerified(ctx context.Context, id pgtype.UUID) error
 	SetUserPendingEmail(ctx context.Context, arg SetUserPendingEmailParams) error
 	SetUserRememberToken(ctx context.Context, arg SetUserRememberTokenParams) error
 	SetUserTwoFactor(ctx context.Context, arg SetUserTwoFactorParams) error
+	TaskExistsInProject(ctx context.Context, arg TaskExistsInProjectParams) (bool, error)
+	TaskHasTimeEntries(ctx context.Context, taskID pgtype.UUID) (bool, error)
+	TimeEntriesBillableAmountBetween(ctx context.Context, arg TimeEntriesBillableAmountBetweenParams) (int64, error)
+	TimeEntriesBillableSumBetween(ctx context.Context, arg TimeEntriesBillableSumBetweenParams) (int64, error)
 	// Member removal -----------------------------------------------------------
 	TimeEntriesExistForMemberUser(ctx context.Context, arg TimeEntriesExistForMemberUserParams) (bool, error)
+	// getDailyTrackedHours / getWeeklyHistory: per-date sums in user tz
+	TimeEntriesForChartAggregate(ctx context.Context, arg TimeEntriesForChartAggregateParams) ([]TimeEntriesForChartAggregateRow, error)
+	TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error)
+	TimeEntryExistsWithTag(ctx context.Context, arg TimeEntryExistsWithTagParams) (bool, error)
+	UpdateClient(ctx context.Context, arg UpdateClientParams) (Client, error)
 	UpdateGoalFilters(ctx context.Context, arg UpdateGoalFiltersParams) error
 	UpdateMemberBillableRate(ctx context.Context, arg UpdateMemberBillableRateParams) error
 	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error
 	UpdateMemberUser(ctx context.Context, arg UpdateMemberUserParams) error
 	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
+	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
+	UpdateProjectMemberRate(ctx context.Context, arg UpdateProjectMemberRateParams) (ProjectMember, error)
+	UpdateTagName(ctx context.Context, arg UpdateTagNameParams) (Tag, error)
+	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
+	UpdateTimeEntriesClientForProject(ctx context.Context, arg UpdateTimeEntriesClientForProjectParams) error
+	UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams) (TimeEntry, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpsertPasswordReset(ctx context.Context, arg UpsertPasswordResetParams) error
 	UpsertSession(ctx context.Context, arg UpsertSessionParams) error
+	WeeklyProjectOverview(ctx context.Context, arg WeeklyProjectOverviewParams) ([]WeeklyProjectOverviewRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

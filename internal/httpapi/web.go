@@ -36,16 +36,17 @@ type Server struct {
 	domain        *domain.Service
 	appURL        string
 	appKey        string
+	storageDir    string
 	smtpAddr      string
 	mailFrom      string
 	secureCookies bool
 	registration  bool
 }
 
-func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr string, secure, registration bool) *Server {
+func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir string, secure, registration bool) *Server {
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
 		domain: domain.NewService(pool),
-		appURL: appURL, appKey: appKey, smtpAddr: smtpAddr, mailFrom: "tock@localhost",
+		appURL: appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
 		secureCookies: secure, registration: registration}
 }
 

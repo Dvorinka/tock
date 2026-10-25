@@ -36,7 +36,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.SecureCookies, cfg.Registration)
+	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.SecureCookies, cfg.Registration)
 
 	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
 	apiAuth := func(next http.Handler) http.Handler {
@@ -92,6 +92,58 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 				r.Get("/organizations/{organization}/importers", srv.handleImporters)
 				r.Post("/organizations/{organization}/import", srv.handleImport)
+
+				// Entity surface — clients, projects, project members,
+				// tags, tasks (routes/api.php verbatim).
+				r.Get("/organizations/{organization}/clients", srv.handleListClients)
+				r.Post("/organizations/{organization}/clients", srv.handleStoreClient)
+				r.Put("/organizations/{organization}/clients/{client}", srv.handleUpdateClient)
+				r.Delete("/organizations/{organization}/clients/{client}", srv.handleDestroyClient)
+
+				r.Get("/organizations/{organization}/projects", srv.handleListProjects)
+				r.Get("/organizations/{organization}/projects/{project}", srv.handleShowProject)
+				r.Post("/organizations/{organization}/projects", srv.handleStoreProject)
+				r.Put("/organizations/{organization}/projects/{project}", srv.handleUpdateProject)
+				r.Delete("/organizations/{organization}/projects/{project}", srv.handleDestroyProject)
+
+				r.Get("/organizations/{organization}/projects/{project}/project-members", srv.handleListProjectMembers)
+				r.Post("/organizations/{organization}/projects/{project}/project-members", srv.handleStoreProjectMember)
+				r.Put("/organizations/{organization}/project-members/{projectMember}", srv.handleUpdateProjectMember)
+				r.Delete("/organizations/{organization}/project-members/{projectMember}", srv.handleDestroyProjectMember)
+
+				r.Get("/organizations/{organization}/tags", srv.handleListTags)
+				r.Post("/organizations/{organization}/tags", srv.handleStoreTag)
+				r.Put("/organizations/{organization}/tags/{tag}", srv.handleUpdateTag)
+				r.Delete("/organizations/{organization}/tags/{tag}", srv.handleDestroyTag)
+
+				r.Get("/organizations/{organization}/tasks", srv.handleListTasks)
+				r.Post("/organizations/{organization}/tasks", srv.handleStoreTask)
+				r.Put("/organizations/{organization}/tasks/{task}", srv.handleUpdateTask)
+				r.Delete("/organizations/{organization}/tasks/{task}", srv.handleDestroyTask)
+
+				// Time entries — order matters: literal segments before {timeEntry}.
+				r.Get("/organizations/{organization}/time-entries", srv.handleListTimeEntries)
+				r.Get("/organizations/{organization}/time-entries/export", srv.handleExportTimeEntries)
+				r.Get("/organizations/{organization}/time-entries/aggregate", srv.handleAggregateTimeEntries)
+				r.Get("/organizations/{organization}/time-entries/aggregate/export", srv.handleAggregateExportTimeEntries)
+				r.Post("/organizations/{organization}/time-entries", srv.handleStoreTimeEntry)
+				r.Patch("/organizations/{organization}/time-entries", srv.handleUpdateMultipleTimeEntries)
+				r.Delete("/organizations/{organization}/time-entries", srv.handleDestroyMultipleTimeEntries)
+				r.Put("/organizations/{organization}/time-entries/{timeEntry}", srv.handleUpdateTimeEntry)
+				r.Delete("/organizations/{organization}/time-entries/{timeEntry}", srv.handleDestroyTimeEntry)
+
+				r.Get("/users/me/time-entries/active", srv.handleMyActiveTimeEntry)
+
+				// Dashboard charts.
+				r.Get("/organizations/{organization}/charts/weekly-project-overview", srv.handleWeeklyProjectOverview)
+				r.Get("/organizations/{organization}/charts/latest-tasks", srv.handleLatestTasks)
+				r.Get("/organizations/{organization}/charts/last-seven-days", srv.handleLastSevenDays)
+				r.Get("/organizations/{organization}/charts/latest-team-activity", srv.handleLatestTeamActivity)
+				r.Get("/organizations/{organization}/charts/daily-tracked-hours", srv.handleDailyTrackedHours)
+				r.Get("/organizations/{organization}/charts/total-weekly-time", srv.handleTotalWeeklyTime)
+				r.Get("/organizations/{organization}/charts/total-weekly-billable-time", srv.handleTotalWeeklyBillableTime)
+				r.Get("/organizations/{organization}/charts/total-weekly-billable-amount", srv.handleTotalWeeklyBillableAmount)
+				r.Get("/organizations/{organization}/charts/weekly-history", srv.handleWeeklyHistory)
 			})
 		})
 		r.NotFound(apiNotFound)
@@ -156,6 +208,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Get("/organization-invitations/{invitation}", func(w http.ResponseWriter, r *http.Request) {
 			srv.handleAcceptInvitation(w, r, true)
 		})
+
+		// Signed export downloads — Laravel local-disk temporaryUrl port.
+		r.Get("/exports/{file}", srv.handleExportDownload)
 
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuth)

@@ -53,3 +53,4 @@ internal/web/dist/*
 !internal/web/dist/
 !internal/web/dist/.gitkeep
 internal/**/storage/
+storage/
