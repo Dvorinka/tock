@@ -101,7 +101,17 @@ func (p *reportProperties) UnmarshalJSON(b []byte) error {
 	p.ProjectIDs, p.TagIDs, p.TaskIDs = j.ProjectIDs, j.TagIDs, j.TaskIDs
 	p.TagMatchType = j.TagMatchType
 	p.RoundingType, p.RoundingMinutes = j.RoundingType, j.RoundingMinutes
+	// ReportPropertiesDto's caster distinguishes a missing key from an explicit
+	// null: reports persisted before time_entry_type existed read as Work, while
+	// a stored null means "work and break entries".
 	p.TimeEntryType = j.TimeEntryType
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(b, &keys) == nil {
+		if _, ok := keys["timeEntryType"]; !ok {
+			work := timeEntryTypeWork
+			p.TimeEntryType = &work
+		}
+	}
 	return nil
 }
 
@@ -448,6 +458,11 @@ func parseStringListOrErr(p map[string]json.RawMessage, key string, allowNone bo
 		if _, ok := domain.UUID(item); !ok {
 			errs[fmt.Sprintf("properties.%s.%d", key, i)] = []string{"The properties." + key + "." + strconv.Itoa(i) + " must be a valid UUID."}
 		}
+	}
+	// ReportPropertiesDto::set*Ids stores null for an empty selection, so an
+	// explicit [] must not reach the JSONB column.
+	if len(list) == 0 {
+		return nil
 	}
 	return &list
 }

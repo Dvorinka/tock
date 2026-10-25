@@ -223,3 +223,58 @@ func TestGenerateSecretShape(t *testing.T) {
 		t.Fatal("secrets must differ")
 	}
 }
+
+// ReportPropertiesDto's caster defaults a *missing* timeEntryType key to Work
+// (reports persisted before the field existed) but keeps an explicit null.
+func TestReportPropertiesLegacyTimeEntryType(t *testing.T) {
+	var legacy reportProperties
+	if err := json.Unmarshal([]byte(`{
+		"group":"project","subGroup":"task","historyGroup":"week",
+		"weekStart":"monday","timezone":"UTC",
+		"start":"2026-09-01T00:00:00Z","end":"2026-10-25T23:59:59Z",
+		"active":null,"memberIds":null,"billable":null,"clientIds":null,
+		"projectIds":null,"tagIds":null,"taskIds":null
+	}`), &legacy); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if legacy.TimeEntryType == nil || *legacy.TimeEntryType != "work" {
+		t.Errorf("missing key must default to work, got %v", legacy.TimeEntryType)
+	}
+
+	var explicit reportProperties
+	if err := json.Unmarshal([]byte(`{
+		"group":"project","subGroup":"task","historyGroup":"week",
+		"weekStart":"monday","timezone":"UTC",
+		"start":"2026-09-01T00:00:00Z","end":"2026-10-25T23:59:59Z",
+		"timeEntryType":null
+	}`), &explicit); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if explicit.TimeEntryType != nil {
+		t.Errorf("explicit null must stay null, got %q", *explicit.TimeEntryType)
+	}
+}
+
+// An empty filter selection is persisted as null, mirroring set*Ids on the DTO.
+func TestParseReportPropertiesEmptyListsBecomeNull(t *testing.T) {
+	body := propsBody(t, `{
+		"group": "project", "sub_group": "task", "history_group": "week",
+		"start": "2026-09-01T00:00:00Z", "end": "2026-10-25T23:59:59Z",
+		"client_ids": [], "member_ids": [], "tag_ids": []
+	}`)
+	props, errs := parseReportProperties(body, testUser())
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if props.ClientIDs != nil || props.MemberIDs != nil || props.TagIDs != nil {
+		t.Errorf("empty selections must be null: client=%v member=%v tag=%v",
+			props.ClientIDs, props.MemberIDs, props.TagIDs)
+	}
+	raw, err := json.Marshal(props)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"clientIds":[]`) {
+		t.Errorf("empty array leaked into JSONB: %s", raw)
+	}
+}
