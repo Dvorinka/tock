@@ -141,7 +141,9 @@ func (s *Server) handleStoreTag(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": tagResource(tag)})
+	// Upstream returns the plain resource, so the status is 200 (only goals
+	// set 201 explicitly).
+	writeJSON(w, http.StatusOK, map[string]any{"data": tagResource(tag)})
 }
 
 func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +309,7 @@ func (s *Server) handleStoreClient(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": clientResource(client)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": clientResource(client)})
 }
 
 func (s *Server) handleUpdateClient(w http.ResponseWriter, r *http.Request) {
@@ -570,7 +572,7 @@ func (s *Server) handleStoreProject(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": projectResource(project, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": projectResource(project, true)})
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
@@ -888,7 +890,7 @@ func (s *Server) handleStoreProjectMember(w http.ResponseWriter, r *http.Request
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": projectMemberResource(pm)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": projectMemberResource(pm)})
 }
 
 // scopedProjectMember loads {projectMember} and verifies it belongs to the org
@@ -1183,7 +1185,7 @@ func (s *Server) handleStoreTask(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": taskResource(task)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": taskResource(task)})
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {

@@ -217,8 +217,9 @@ func groupDescription(item map[string]any) string {
 	return ""
 }
 
-// aggCellLabelPDF is the PDF variant — null keys render 'No <group>'.
-func aggCellLabelPDF(item map[string]any, groupType string, l localization, upper bool) string {
+// aggCellLabelPDF is the PDF variant — null keys always render
+// 'No <group>' (the blade has no '-' fallback).
+func aggCellLabelPDF(item map[string]any, groupType string, l localization) string {
 	key := groupKey(item)
 	if groupType == "billable" {
 		if key == "1" {
@@ -232,11 +233,7 @@ func aggCellLabelPDF(item map[string]any, groupType string, l localization, uppe
 	if v := l.formatTimeGroupKey(keyOrNil(key), groupType); v != nil && *v != "" {
 		return *v
 	}
-	label := aggregationDescription(groupType)
-	if upper {
-		return "No " + strings.ToLower(label)
-	}
-	return "-"
+	return "No " + strings.ToLower(aggregationDescription(groupType))
 }
 
 func buildAggRows(result map[string]any, group, subGroup string, l localization) []aggExportRow {
@@ -587,10 +584,12 @@ func (s *Server) gotenbergPDF(indexHTML, footerHTML string, assets map[string][]
 		}
 	}
 	fields := map[string]string{
+		// gotenberg-php margins(top, right, bottom, left) — the charts need a
+		// wider right gutter, not a wider bottom one.
 		"marginTop":    "0.39",
-		"marginBottom": "0.78",
+		"marginRight":  "0.78",
+		"marginBottom": "0.39",
 		"marginLeft":   "0.39",
-		"marginRight":  "0.39",
 		"paperWidth":   "8.27",
 		"paperHeight":  "11.7",
 	}

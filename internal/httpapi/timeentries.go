@@ -508,7 +508,7 @@ func (s *Server) handleStoreTimeEntry(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": timeEntryResource(entry)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": timeEntryResource(entry)})
 }
 
 // teVals is the validated payload shared by store/update.

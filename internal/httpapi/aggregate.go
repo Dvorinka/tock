@@ -1167,7 +1167,7 @@ func (s *Server) aggPDFTemplateData(result, history map[string]any, group, subGr
 	groups := make([]aggPDFGroup1, 0, len(gd))
 	pieItems := []map[string]any{}
 	for _, g1 := range gd {
-		label := aggCellLabelPDF(g1, group, loc, true)
+		label := aggCellLabelPDF(g1, group, loc)
 		key, _ := g1["key"].(*string)
 		color := colorByKey(key)
 		if c, ok := g1["color"].(*string); ok && c != nil && *c != "" {
@@ -1184,7 +1184,7 @@ func (s *Server) aggPDFTemplateData(result, history map[string]any, group, subGr
 		sub, _ := g1["grouped_data"].([]map[string]any)
 		for _, g2 := range sub {
 			rows = append(rows, aggPDFGroup2{
-				Label:    aggCellLabelPDF(g2, subGroup, loc, false),
+				Label:    aggCellLabelPDF(g2, subGroup, loc),
 				Duration: loc.formatIntervalForReporting(intSeconds(g2["seconds"])),
 				Hours:    loc.formatNumber(float64(intSeconds(g2["seconds"])) / 3600),
 				Cost:     loc.formatCurrency(intCost(g2["cost"])),

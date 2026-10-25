@@ -3,7 +3,9 @@ package httpapi
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -184,7 +186,7 @@ func (s *Server) resolveReport(w http.ResponseWriter, r *http.Request, perm stri
 		return nil, nil, false
 	}
 	if rep.OrganizationID != scope.org.ID {
-		writeMessage(w, http.StatusNotFound, modelNotFound("Report", chi.URLParam(r, "report")))
+		writeMessage(w, http.StatusForbidden, "This action is unauthorized.")
 		return nil, nil, false
 	}
 	return scope, &rep, true
@@ -238,23 +240,35 @@ func (s *Server) handleStoreReport(w http.ResponseWriter, r *http.Request) {
 	}
 	errs := map[string][]string{}
 	name, namePresent, nameValid := jsonStr(body, "name")
-	if !namePresent || !nameValid || name == "" || len(name) > 255 {
+	switch {
+	case !namePresent:
 		errs["name"] = []string{"The name field is required."}
+	case !nameValid:
+		errs["name"] = []string{"The name must be a string."}
+	case len(name) > 255:
+		errs["name"] = []string{"The name must not be greater than 255 characters."}
 	}
+	// nullable|string: an explicit "" is stored as "", absent/null as null.
 	var description *string
-	if _, present := body["description"]; present {
-		if s2, _, ok := jsonStr(body, "description"); ok && s2 != "" {
+	if raw, present := body["description"]; present && string(raw) != "null" {
+		if s2, _, ok := jsonStr(body, "description"); ok {
 			description = &s2
+		} else {
+			errs["description"] = []string{"The description must be a string."}
 		}
 	}
 	isPublic, pubPresent, pubValid := jsonBool(body, "is_public")
-	if !pubPresent || !pubValid {
+	if !pubPresent {
 		errs["is_public"] = []string{"The is public field is required."}
+	} else if !pubValid {
+		errs["is_public"] = []string{"The is public field must be true or false."}
 	}
 	publicUntil := parseNullableZulu(body, "public_until", errs)
 	var propsRaw map[string]json.RawMessage
-	if p, present := body["properties"]; !present || json.Unmarshal(p, &propsRaw) != nil {
+	if p, present := body["properties"]; !present {
 		errs["properties"] = []string{"The properties field is required."}
+	} else if json.Unmarshal(p, &propsRaw) != nil {
+		errs["properties"] = []string{"The properties must be an array."}
 	}
 	if len(errs) > 0 {
 		validationErr(w, errs)
@@ -356,11 +370,11 @@ func parseReportProperties(p map[string]json.RawMessage, u *auth.User) (reportPr
 			props.Billable = &b
 		}
 	}
-	props.MemberIDs = parseStringListOrErr(p, "member_ids", errs)
-	props.ClientIDs = parseStringListOrErr(p, "client_ids", errs)
-	props.ProjectIDs = parseStringListOrErr(p, "project_ids", errs)
-	props.TagIDs = parseStringListOrErr(p, "tag_ids", errs)
-	props.TaskIDs = parseStringListOrErr(p, "task_ids", errs)
+	props.MemberIDs = parseStringListOrErr(p, "member_ids", false, errs)
+	props.ClientIDs = parseStringListOrErr(p, "client_ids", true, errs)
+	props.ProjectIDs = parseStringListOrErr(p, "project_ids", true, errs)
+	props.TagIDs = parseStringListOrErr(p, "tag_ids", true, errs)
+	props.TaskIDs = parseStringListOrErr(p, "task_ids", true, errs)
 	if v, present := p["tag_match_type"]; present {
 		if s2, ok := rawString(v); ok && (s2 == "contains" || s2 == "not_contains") {
 			props.TagMatchType = &s2
@@ -398,10 +412,8 @@ func parseReportProperties(p map[string]json.RawMessage, u *auth.User) (reportPr
 			props.TimeEntryType = &s2
 		}
 	}
-	if props.TimeEntryType == nil {
-		def := timeEntryTypeWork
-		props.TimeEntryType = &def
-	}
+	// Upstream stores `properties.time_entry_type` as null when absent, which
+	// means the report aggregates work and break entries alike.
 	return props, errs
 }
 
@@ -419,7 +431,7 @@ func isValidTimezone(tz string) bool {
 	return false
 }
 
-func parseStringListOrErr(p map[string]json.RawMessage, key string, errs map[string][]string) *[]string {
+func parseStringListOrErr(p map[string]json.RawMessage, key string, allowNone bool, errs map[string][]string) *[]string {
 	v, present := p[key]
 	if !present || string(v) == "null" {
 		return nil
@@ -428,6 +440,14 @@ func parseStringListOrErr(p map[string]json.RawMessage, key string, errs map[str
 	if json.Unmarshal(v, &list) != nil {
 		errs["properties."+key] = []string{"The " + strings.ReplaceAll(key, "_", " ") + " must be an array."}
 		return nil
+	}
+	for i, item := range list {
+		if allowNone && item == timeEntryFilterNone {
+			continue
+		}
+		if _, ok := domain.UUID(item); !ok {
+			errs[fmt.Sprintf("properties.%s.%d", key, i)] = []string{"The properties." + key + "." + strconv.Itoa(i) + " must be a valid UUID."}
+		}
 	}
 	return &list
 }
@@ -445,15 +465,23 @@ func (s *Server) handleUpdateReport(w http.ResponseWriter, r *http.Request) {
 	errs := map[string][]string{}
 	if _, present := body["name"]; present {
 		v, _, valid := jsonStr(body, "name")
-		if !valid || v == "" || len(v) > 255 {
+		switch {
+		case !valid:
+			errs["name"] = []string{"The name must be a string."}
+		case len(v) > 255:
 			errs["name"] = []string{"The name must not be greater than 255 characters."}
-		} else {
+		default:
+			// Upstream's update rules omit `required`, so "" is accepted.
 			rep.Name = v
 		}
 	}
-	if _, present := body["description"]; present {
-		if s2, _, valid := jsonStr(body, "description"); valid {
+	if raw, present := body["description"]; present {
+		if string(raw) == "null" {
+			rep.Description = nil
+		} else if s2, _, valid := jsonStr(body, "description"); valid {
 			rep.Description = &s2
+		} else {
+			errs["description"] = []string{"The description must be a string."}
 		}
 	}
 	if _, present := body["is_public"]; present {
@@ -616,6 +644,10 @@ func derefList(l *[]string) []string {
 	return *l
 }
 
+// timeEntryFilterNone is TimeEntryFilter::NONE_VALUE — the sentinel a saved
+// report uses for "entries without this relation".
+const timeEntryFilterNone = "none"
+
 // generateSecret ports ReportService::generateSecret (Str::random(40)).
 func generateSecret(n int) string {
 	const alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -653,10 +685,15 @@ func parseNullableZulu(body map[string]json.RawMessage, key string, errs map[str
 	if !present || string(v) == "null" {
 		return pgtype.Timestamp{}
 	}
+	label := strings.ReplaceAll(key, "_", " ")
 	s, ok := rawString(v)
 	t, parsed := parseZulu(s)
-	if !ok || !parsed || !t.After(time.Now()) {
-		errs[key] = []string{"The " + strings.ReplaceAll(key, "_", " ") + " must be a date after now."}
+	if !ok || !parsed {
+		errs[key] = []string{"The " + label + " does not match the format Y-m-d\\TH:i:s\\Z."}
+		return pgtype.Timestamp{}
+	}
+	if !t.After(time.Now()) {
+		errs[key] = []string{"The " + label + " must be a date after now."}
 		return pgtype.Timestamp{}
 	}
 	return pgtype.Timestamp{Time: t, Valid: true}

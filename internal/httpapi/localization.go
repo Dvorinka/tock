@@ -137,7 +137,8 @@ func (l localization) formatDate(t time.Time) string {
 // formatTime ports LocalizationService::formatTime.
 func (l localization) formatTime(t time.Time) string {
 	if l.timeFormat == "12-hours" {
-		return strings.ToLower(t.Format("3:04 pm"))
+		// Upstream 'h:i a' — zero-padded hour, lowercase meridiem.
+		return t.Format("03:04 pm")
 	}
 	return t.Format("15:04")
 }
