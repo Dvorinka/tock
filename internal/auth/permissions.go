@@ -91,3 +91,22 @@ func PermissionsForRole(role string, employeesCanManageTasks bool) []string {
 	}
 	return out
 }
+
+// RoleDefinition mirrors PermissionStore::ROLE_DEFINITIONS entries.
+type RoleDefinition struct {
+	Key         string
+	Name        string
+	Description string
+}
+
+// RoleDefinitions returns the role definitions in upstream order
+// (PermissionStore::roleDefinitions() → collect → map → values()).
+func RoleDefinitions() []RoleDefinition {
+	return []RoleDefinition{
+		{Key: "owner", Name: "Owner", Description: "Owner users can perform any action. There is only one owner per organization."},
+		{Key: "admin", Name: "Administrator", Description: "Administrator users can perform any action, except accessing the billing dashboard."},
+		{Key: "manager", Name: "Manager", Description: "Managers have full access to all projects, time entries, ect. but cannot manage the organization (add/remove member, edit the organization, ect.)."}, //nolint:misspell // verbatim upstream typo
+		{Key: "employee", Name: "Employee", Description: "Employees have the ability to read, create, and update their own time entries, they can see the projects that they are members of and the clients they are assigned to."},
+		{Key: "placeholder", Name: "Placeholder", Description: "Placeholders are used for importing data. They cannot log in and have no permissions."},
+	}
+}

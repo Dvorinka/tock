@@ -5,12 +5,15 @@ package httpapi
 // indexExport/aggregateExport endpoints of TimeEntryController.
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"html/template"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -558,6 +561,7 @@ func (s *Server) attachDescriptions(ctx context.Context, result map[string]any, 
 			}
 			rows, err := s.pool.Query(ctx, "SELECT "+sel+" FROM "+table+" WHERE id = ANY($1::uuid[])", keys)
 			if err != nil {
+				slog.ErrorContext(ctx, "aggregate descriptions: query failed", "table", table, "error", err)
 				return out
 			}
 			for rows.Next() {
@@ -615,9 +619,12 @@ func (s *Server) attachDescriptions(ctx context.Context, result map[string]any, 
 	for i, item := range gd {
 		if k, ok := item["key"].(string); ok {
 			if d, ok := map1[k]; ok {
-				gd[i]["description"] = *d[0]
-				gd[i]["color"] = d[1]
+				gd[i]["description"], gd[i]["color"] = *d[0], d[1]
+			} else {
+				gd[i]["description"], gd[i]["color"] = nil, nil
 			}
+		} else {
+			gd[i]["description"], gd[i]["color"] = nil, nil
 		}
 		sub, _ := item["grouped_data"].([]map[string]any)
 		if sub != nil {
@@ -631,9 +638,12 @@ func (s *Server) attachDescriptions(ctx context.Context, result map[string]any, 
 			for j, s2 := range sub {
 				if k, ok := s2["key"].(string); ok {
 					if d, ok := map2[k]; ok {
-						sub[j]["description"] = *d[0]
-						sub[j]["color"] = d[1]
+						sub[j]["description"], sub[j]["color"] = *d[0], d[1]
+					} else {
+						sub[j]["description"], sub[j]["color"] = nil, nil
 					}
+				} else {
+					sub[j]["description"], sub[j]["color"] = nil, nil
 				}
 			}
 			gd[i]["grouped_data"] = sub
@@ -751,7 +761,7 @@ func (s *Server) handleAggregateTimeEntries(w http.ResponseWriter, r *http.Reque
 	}
 	f := s.buildTimeEntryWhere(r, scope.org.ID, memberFilter)
 	result, err := s.aggregate(r.Context(), f, p.group1, p.group2, userTZ(u), u.WeekStart,
-		p.fillGaps, p.start, p.end, canSeeBillableRates(scope), p.roundingType, p.roundingMinutes, false)
+		p.fillGaps, p.start, p.end, canSeeBillableRates(scope), p.roundingType, p.roundingMinutes, true)
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
@@ -817,6 +827,11 @@ func (s *Server) handleExportDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(s.storageDir, "exports", file))
 }
 
+// exportFilename matches upstream: <prefix>-Y-m-d_H-i-s-<uuid>.<ext>.
+func exportFilename(prefix, ext string) string {
+	return fmt.Sprintf("%s-%s-%s.%s", prefix, time.Now().Format("2006-01-02_15-04-05"), newUUID(), ext)
+}
+
 func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.resolveOrg(w, r, "")
 	if !ok {
@@ -827,9 +842,35 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	format := r.URL.Query().Get("format")
-	if format != "csv" {
-		// xlsx/ods/pdf land in Phase 4; upstream would also 422 on unknown.
+	if format != "csv" && format != "xlsx" && format != "ods" && format != "pdf" {
 		validationErr(w, map[string][]string{"format": {"The selected format is invalid."}})
+		return
+	}
+	debug := r.URL.Query().Get("debug") == "true"
+	// Upstream TimeEntryIndexExportRequest: start/end are required Zulu
+	// timestamps (unlike the list endpoint, where they are optional).
+	q := r.URL.Query()
+	var rangeStart, rangeEnd time.Time
+	errs := map[string][]string{}
+	if v := q.Get("start"); v == "" {
+		errs["start"] = []string{"The start field is required."}
+	} else if t, ok := parseZulu(v); ok {
+		rangeStart = t
+	} else {
+		errs["start"] = []string{"The start does not match the format Y-m-d\\TH:i:s\\Z."}
+	}
+	if v := q.Get("end"); v == "" {
+		errs["end"] = []string{"The end field is required."}
+	} else if t, ok := parseZulu(v); ok {
+		rangeEnd = t
+	} else {
+		errs["end"] = []string{"The end does not match the format Y-m-d\\TH:i:s\\Z."}
+	}
+	if len(errs) == 0 && !rangeStart.Before(rangeEnd) {
+		errs["start"] = []string{"The start must be a date before end."}
+	}
+	if len(errs) > 0 {
+		validationErr(w, errs)
 		return
 	}
 	u := auth.UserFromContext(r.Context())
@@ -840,54 +881,80 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	// Resolve display names like the export's eager relations.
 	names := s.exportNames(r, entries)
 	tz := userTZ(u)
-	url, err := s.exportCSV(r, "time-entries-*.csv", func(cw *csv.Writer) error {
-		if err := cw.Write([]string{"Description", "Task", "Project", "Client", "User", "Start", "End", "Duration", "Duration (decimal)", "Billable", "Break", "Tags"}); err != nil {
-			return err
-		}
-		for _, e := range entries {
-			end := ""
-			dur := ""
-			durDec := ""
-			if e.End.Valid {
-				end = e.End.Time.In(tz).Format("2006-01-02 15:04:05")
-				secs := int64(e.End.Time.Sub(e.Start.Time).Seconds())
-				dur = formatInterval(secs)
-				durDec = strconv.FormatFloat(float64(secs)/3600, 'f', -1, 64)
-			}
-			billable := "No"
-			if e.Billable {
-				billable = "Yes"
-			}
-			brk := "No"
-			if e.Type == timeEntryTypeBreak {
-				brk = "Yes"
-			}
-			tagNames := []string{}
-			var tagIDs []string
-			_ = json.Unmarshal(e.Tags, &tagIDs)
-			for _, t := range tagIDs {
-				if n, ok := names.tags[t]; ok {
-					tagNames = append(tagNames, n)
-				}
-			}
-			if err := cw.Write([]string{
-				e.Description,
-				names.tasks[uuidStr(e.TaskID)],
-				names.projects[uuidStr(e.ProjectID)],
-				names.clients[uuidStr(e.ClientID)],
-				names.users[uuidStr(e.UserID)],
-				e.Start.Time.In(tz).Format("2006-01-02 15:04:05"),
-				end, dur, durDec, billable, brk,
-				strings.Join(tagNames, ", "),
-			}); err != nil {
+	loc := localizationFor(scope.org)
+	rows := buildDetailedRows(entries, names, tz)
+	showBillable := canSeeBillableRates(scope)
+	var content []byte
+	filename := exportFilename("time-entries-export", format)
+	switch format {
+	case "csv":
+		url, err := s.exportCSV(r, "time-entries-*.csv", func(cw *csv.Writer) error {
+			if err := cw.Write(detailedHeader); err != nil {
 				return err
 			}
+			for _, row := range rows {
+				if err := cw.Write(row.csvCells(loc, formatInterval)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
 		}
-		return nil
-	})
+		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
+		return
+	case "xlsx":
+		content, err = writeDetailedXLSX(rows, loc)
+	case "ods":
+		content, err = writeDetailedODS(rows, loc)
+	case "pdf":
+		// Aggregate totals for the summary strip (same query, no grouping).
+		totals, aggErr := s.aggregate(r.Context(), f, "", "", userTZ(u), u.WeekStart,
+			false, nil, nil, showBillable, "", 0, false)
+		if aggErr != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		var buf bytes.Buffer
+		data := detailedPDFData{
+			Loc:           &loc,
+			Timezone:      tz.String(),
+			StartLabel:    loc.formatDate(rangeStart.In(tz)),
+			EndLabel:      loc.formatDate(rangeEnd.In(tz)),
+			ShowBillable:  showBillable,
+			TotalDuration: loc.formatIntervalForReporting(intSeconds(totals["seconds"])),
+			TotalCost:     loc.formatCurrency(intCost(totals["cost"])),
+			Entries:       pdfEntries(rows),
+		}
+		if err := detailedPDFTemplate.Execute(&buf, data); err != nil {
+			slog.Error("detailed pdf template failed", "error", err)
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		var footer bytes.Buffer
+		_ = pdfFooterTemplate.Execute(&footer, nil)
+		if debug {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"html": buf.String(), "footer_html": footer.String()})
+			return
+		}
+		content, err = s.gotenbergPDF(buf.String(), footer.String(),
+			map[string][]byte{"outfit.ttf": outfitTTF}, "")
+	}
+	if err != nil {
+		if format == "pdf" && strings.Contains(err.Error(), "not configured") {
+			writeDomainErr(w, domain.ErrPDFRendererNotConfigured)
+			return
+		}
+		slog.Error("export generation failed", "format", format, "error", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	url, err := s.saveExportFile(filename, content)
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
@@ -975,59 +1042,210 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 		return
 	}
 	format := r.URL.Query().Get("format")
-	if format != "csv" {
+	if format != "csv" && format != "xlsx" && format != "ods" && format != "pdf" {
 		validationErr(w, map[string][]string{"format": {"The selected format is invalid."}})
 		return
 	}
+	debug := r.URL.Query().Get("debug") == "true"
 	u := auth.UserFromContext(r.Context())
 	p, errs := parseAggregateParams(r, true)
 	if len(errs) > 0 {
 		validationErr(w, errs)
 		return
 	}
+	// Upstream marks sub_group + history_group required on the export request.
+	if p.group2 == "" {
+		validationErr(w, map[string][]string{"sub_group": {"The sub group field is required."}})
+		return
+	}
+	historyGroup := r.URL.Query().Get("history_group")
+	if historyGroup != "day" && historyGroup != "week" && historyGroup != "month" && historyGroup != "year" {
+		validationErr(w, map[string][]string{"history_group": {"The history group field is required."}})
+		return
+	}
+	showBillable := canSeeBillableRates(scope)
+	loc := localizationFor(scope.org)
 	f := s.buildTimeEntryWhere(r, scope.org.ID, memberFilter)
 	result, err := s.aggregate(r.Context(), f, p.group1, p.group2, userTZ(u), u.WeekStart,
-		false, p.start, p.end, canSeeBillableRates(scope), p.roundingType, p.roundingMinutes, true)
+		false, p.start, p.end, showBillable, p.roundingType, p.roundingMinutes, true)
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	url, err := s.exportCSV(r, "report-*.csv", func(cw *csv.Writer) error {
-		if err := cw.Write([]string{"Group", "Subgroup", "Description", "Seconds", "Cost"}); err != nil {
-			return err
-		}
-		gd, _ := result["grouped_data"].([]map[string]any)
-		var walk func(items []map[string]any, depth int) error
-		walk = func(items []map[string]any, depth int) error {
-			for _, item := range items {
-				desc, _ := item["description"].(string)
-				key, _ := item["key"].(string)
-				if desc == "" {
-					desc = key
+	rows := buildAggRows(result, p.group1, p.group2, loc)
+	var content []byte
+	filename := exportFilename("time-entries-report", format)
+	switch format {
+	case "csv":
+		url, err := s.exportCSV(r, "report-*.csv", func(cw *csv.Writer) error {
+			if err := cw.Write(aggExportHeader(p.group1, p.group2, scope.org.Currency)); err != nil {
+				return err
+			}
+			var totalSec, totalCost int64
+			for _, row := range rows {
+				rec := []string{
+					row.g1Label, row.g2Label,
+					formatInterval(row.seconds),
+					strconv.FormatFloat(round2(float64(row.seconds)/3600), 'f', -1, 64),
 				}
-				cols := []string{"", "", desc,
-					fmt.Sprint(item["seconds"]), fmt.Sprint(item["cost"])}
-				if depth == 0 {
-					cols[0] = fmt.Sprint(result["grouped_type"])
-				} else {
-					cols[1] = fmt.Sprint(item["grouped_type"])
+				if showBillable {
+					rec = append(rec, strconv.FormatFloat(round2(float64(row.cost)/100), 'f', -1, 64))
 				}
-				if err := cw.Write(cols); err != nil {
+				if err := cw.Write(rec); err != nil {
 					return err
 				}
-				if sub, ok := item["grouped_data"].([]map[string]any); ok && len(sub) > 0 {
-					if err := walk(sub, depth+1); err != nil {
-						return err
-					}
-				}
+				totalSec += row.seconds
+				totalCost += row.cost
 			}
-			return nil
+			total := []string{"", "Total",
+				formatInterval(totalSec),
+				strconv.FormatFloat(round2(float64(totalSec)/3600), 'f', -1, 64),
+			}
+			if showBillable {
+				total = append(total, strconv.FormatFloat(round2(float64(totalCost)/100), 'f', -1, 64))
+			}
+			return cw.Write(total)
+		})
+		if err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
 		}
-		return walk(gd, 0)
-	})
+		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
+		return
+	case "xlsx":
+		content, err = writeAggXLSX(rows, p.group1, p.group2, scope.org.Currency, showBillable, loc)
+	case "ods":
+		content, err = writeAggODS(rows, p.group1, p.group2, scope.org.Currency, showBillable, loc)
+	case "pdf":
+		// History chart aggregation — interval group with gap filling.
+		histF := s.buildTimeEntryWhere(r, scope.org.ID, memberFilter)
+		history, histErr := s.aggregate(r.Context(), histF, aggregationFromInterval(historyGroup), "",
+			userTZ(u), u.WeekStart, true, p.start, p.end, showBillable, p.roundingType, p.roundingMinutes, false)
+		if histErr != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		htmlData := s.aggPDFTemplateData(result, history, p.group1, p.group2, showBillable, loc, userTZ(u), r, debug)
+		var buf bytes.Buffer
+		if err := aggregatePDFTemplate.Execute(&buf, htmlData); err != nil {
+			slog.Error("aggregate pdf template failed", "error", err)
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		var footer bytes.Buffer
+		_ = pdfFooterTemplate.Execute(&footer, nil)
+		if debug {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"html": buf.String(), "footer_html": footer.String()})
+			return
+		}
+		content, err = s.gotenbergPDF(buf.String(), footer.String(),
+			map[string][]byte{"outfit.ttf": outfitTTF, "echarts.min.js": echartsJS},
+			"window.status === 'ready'")
+	}
+	if err != nil {
+		if format == "pdf" && strings.Contains(err.Error(), "not configured") {
+			writeDomainErr(w, domain.ErrPDFRendererNotConfigured)
+			return
+		}
+		slog.Error("export generation failed", "format", format, "error", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	url, err := s.saveExportFile(filename, content)
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
+}
+
+// aggPDFTemplateData builds the aggregate PDF view model — pie data, chart
+// labels/values, and per-group tables, mirroring the blade.
+func (s *Server) aggPDFTemplateData(result, history map[string]any, group, subGroup string, showBillable bool, loc localization, tz *time.Location, r *http.Request, debug bool) aggPDFData {
+	gd, _ := result["grouped_data"].([]map[string]any)
+	groups := make([]aggPDFGroup1, 0, len(gd))
+	pieItems := []map[string]any{}
+	for _, g1 := range gd {
+		label := aggCellLabelPDF(g1, group, loc, true)
+		key, _ := g1["key"].(*string)
+		color := colorByKey(key)
+		if c, ok := g1["color"].(*string); ok && c != nil && *c != "" {
+			color = *c
+		}
+		pieItems = append(pieItems, map[string]any{
+			"value": intSeconds(g1["seconds"]),
+			"name":  label,
+			"color": color,
+			"itemStyle": map[string]any{"color": color},
+			"emphasis":  map[string]any{"itemStyle": map[string]any{"color": color}},
+		})
+		rows := []aggPDFGroup2{}
+		sub, _ := g1["grouped_data"].([]map[string]any)
+		for _, g2 := range sub {
+			rows = append(rows, aggPDFGroup2{
+				Label:    aggCellLabelPDF(g2, subGroup, loc, false),
+				Duration: loc.formatIntervalForReporting(intSeconds(g2["seconds"])),
+				Hours:    loc.formatNumber(float64(intSeconds(g2["seconds"])) / 3600),
+				Cost:     loc.formatCurrency(intCost(g2["cost"])),
+			})
+		}
+		groups = append(groups, aggPDFGroup1{
+			Label:    label,
+			Color:    color,
+			Duration: loc.formatIntervalForReporting(intSeconds(g1["seconds"])),
+			Cost:     loc.formatCurrency(intCost(g1["cost"])),
+			Rows:     rows,
+		})
+	}
+	hgd, _ := history["grouped_data"].([]map[string]any)
+	labels := []string{}
+	values := []map[string]any{}
+	for _, h := range hgd {
+		key, _ := h["key"].(*string)
+		label := ""
+		if key != nil {
+			if t, err := time.Parse("2006-01-02", *key); err == nil {
+				label = loc.formatDate(t)
+			} else {
+				label = *key
+			}
+		}
+		labels = append(labels, label)
+		name := ""
+		if secs := intSeconds(h["seconds"]); secs != 0 {
+			name = loc.formatIntervalForReporting(secs)
+		}
+		values = append(values, map[string]any{"value": intSeconds(h["seconds"]), "name": name})
+	}
+	pieJSON, _ := json.Marshal(pieItems)
+	labelsJSON, _ := json.Marshal(labels)
+	valuesJSON, _ := json.Marshal(values)
+	startLabel, endLabel := "", ""
+	if p := r.URL.Query().Get("start"); p != "" {
+		if t, ok := parseZulu(p); ok {
+			startLabel = loc.formatDate(t.In(tz))
+		}
+	}
+	if p := r.URL.Query().Get("end"); p != "" {
+		if t, ok := parseZulu(p); ok {
+			endLabel = loc.formatDate(t.In(tz))
+		}
+	}
+	return aggPDFData{
+		Loc:           &loc,
+		StartLabel:    startLabel,
+		EndLabel:      endLabel,
+		ShowBillable:  showBillable,
+		TotalDuration: loc.formatIntervalForReporting(intSeconds(result["seconds"])),
+		TotalCost:     loc.formatCurrency(intCost(result["cost"])),
+		GroupLabel:    aggregationDescription(group),
+		SubGroupLabel: aggregationDescription(subGroup),
+		Groups:        groups,
+		PieData:       template.JS(pieJSON),
+		ChartLabels:   template.JS(labelsJSON),
+		ChartValues:   template.JS(valuesJSON),
+		ChartRotate:   len(hgd) > 15,
+		Debug:         debug,
+	}
 }

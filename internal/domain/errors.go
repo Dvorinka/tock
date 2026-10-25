@@ -51,3 +51,5 @@ var (
 	ErrInactiveUser                = apiErr("inactive_user_can_not_be_used", "Inactive user can not be used")
 	ErrUserAlreadyProjectMember    = apiErr("user_is_already_member_of_project", "User is already a member of the project")
 )
+
+var ErrPDFRendererNotConfigured = apiErr("pdf_renderer_is_not_configured", "PDF renderer is not configured")

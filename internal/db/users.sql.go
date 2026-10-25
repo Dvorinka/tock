@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyPendingEmail = `-- name: ApplyPendingEmail :exec
+UPDATE users SET email = $2, pending_email = NULL, email_verified_at = now(),
+       updated_at = now()
+WHERE id = $1
+`
+
+type ApplyPendingEmailParams struct {
+	ID    pgtype.UUID
+	Email string
+}
+
+func (q *Queries) ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) error {
+	_, err := q.db.Exec(ctx, applyPendingEmail, arg.ID, arg.Email)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, name, email, email_verified_at, timezone, week_start, current_team_id, is_placeholder, password
 FROM users
@@ -79,4 +95,23 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 		&i.IsPlaceholder,
 	)
 	return i, err
+}
+
+const userWithEmailExists = `-- name: UserWithEmailExists :one
+SELECT EXISTS(
+    SELECT 1 FROM users
+    WHERE email = $1 AND is_placeholder = false AND id != $2
+) AS exists
+`
+
+type UserWithEmailExistsParams struct {
+	Email string
+	ID    pgtype.UUID
+}
+
+func (q *Queries) UserWithEmailExists(ctx context.Context, arg UserWithEmailExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, userWithEmailExists, arg.Email, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

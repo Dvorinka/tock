@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	AcceptedInvitationsForEmail(ctx context.Context, lower string) ([]OrganizationInvitation, error)
+	ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) error
 	ClearCurrentTeamForOrg(ctx context.Context, currentTeamID pgtype.UUID) error
 	ClearUserCurrentTeam(ctx context.Context, id pgtype.UUID) error
 	ClientHasProjects(ctx context.Context, clientID pgtype.UUID) (bool, error)
@@ -23,6 +24,7 @@ type Querier interface {
 	CountNonPlaceholderMembers(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectMembers(ctx context.Context, projectID pgtype.UUID) (int64, error)
 	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
+	CountReports(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountRunningTimeEntriesForUser(ctx context.Context, userID pgtype.UUID) (int64, error)
 	CountTags(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
@@ -53,6 +55,7 @@ type Querier interface {
 	DeleteProjectMembersForProject(ctx context.Context, projectID pgtype.UUID) error
 	DeleteProjectsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	DeleteRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteReport(ctx context.Context, id pgtype.UUID) error
 	DeleteReportsForOrg(ctx context.Context, organizationID pgtype.UUID) error
 	// Entity reassignment (merge / placeholder transitions) --------------------
 	DeleteRunningTimeEntriesForMember(ctx context.Context, arg DeleteRunningTimeEntriesForMemberParams) error
@@ -87,6 +90,8 @@ type Querier interface {
 	GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (ProjectMember, error)
 	GetProjectMemberByID(ctx context.Context, id pgtype.UUID) (GetProjectMemberByIDRow, error)
 	GetRefreshToken(ctx context.Context, id string) (OauthRefreshToken, error)
+	GetReportByID(ctx context.Context, id pgtype.UUID) (Report, error)
+	GetReportByShareSecret(ctx context.Context, shareSecret *string) (GetReportByShareSecretRow, error)
 	GetSession(ctx context.Context, id string) (Session, error)
 	GetTagByID(ctx context.Context, id pgtype.UUID) (Tag, error)
 	GetTaskByID(ctx context.Context, id pgtype.UUID) (Task, error)
@@ -104,6 +109,7 @@ type Querier interface {
 	InsertProject(ctx context.Context, arg InsertProjectParams) (Project, error)
 	InsertProjectMember(ctx context.Context, arg InsertProjectMemberParams) (ProjectMember, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertReport(ctx context.Context, arg InsertReportParams) (pgtype.UUID, error)
 	InsertTag(ctx context.Context, arg InsertTagParams) (Tag, error)
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	InsertTimeEntry(ctx context.Context, arg InsertTimeEntryParams) (TimeEntry, error)
@@ -121,6 +127,7 @@ type Querier interface {
 	ListMembersPaginated(ctx context.Context, arg ListMembersPaginatedParams) ([]ListMembersPaginatedRow, error)
 	ListProjectMembersPaginated(ctx context.Context, arg ListProjectMembersPaginatedParams) ([]ProjectMember, error)
 	ListProjectsPaginated(ctx context.Context, arg ListProjectsPaginatedParams) ([]Project, error)
+	ListReportsPaginated(ctx context.Context, arg ListReportsPaginatedParams) ([]Report, error)
 	ListTagsPaginated(ctx context.Context, arg ListTagsPaginatedParams) ([]Tag, error)
 	ListTasksPaginated(ctx context.Context, arg ListTasksPaginatedParams) ([]Task, error)
 	// User deletion (DeletionService::deleteUser) -------------------------------
@@ -180,6 +187,7 @@ type Querier interface {
 	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateProjectMemberRate(ctx context.Context, arg UpdateProjectMemberRateParams) (ProjectMember, error)
+	UpdateReport(ctx context.Context, arg UpdateReportParams) error
 	UpdateTagName(ctx context.Context, arg UpdateTagNameParams) (Tag, error)
 	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
 	UpdateTimeEntriesClientForProject(ctx context.Context, arg UpdateTimeEntriesClientForProjectParams) error
@@ -188,6 +196,7 @@ type Querier interface {
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpsertPasswordReset(ctx context.Context, arg UpsertPasswordResetParams) error
 	UpsertSession(ctx context.Context, arg UpsertSessionParams) error
+	UserWithEmailExists(ctx context.Context, arg UserWithEmailExistsParams) (bool, error)
 	WeeklyProjectOverview(ctx context.Context, arg WeeklyProjectOverviewParams) ([]WeeklyProjectOverviewRow, error)
 }
 

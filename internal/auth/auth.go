@@ -377,3 +377,11 @@ func clientIP(r *http.Request) string {
 	}
 	return host
 }
+
+// DeleteOtherSessions removes all sessions for a user except keepID —
+// OtherBrowserSessionsController::deleteOtherSessionRecords.
+func (s *Store) DeleteOtherSessions(ctx context.Context, userID, keepID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM sessions WHERE user_id = $1 AND id != $2`, userID, keepID)
+	return err
+}

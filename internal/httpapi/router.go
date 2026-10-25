@@ -36,7 +36,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.SecureCookies, cfg.Registration)
+	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration)
 
 	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
 	apiAuth := func(next http.Handler) http.Handler {
@@ -63,6 +63,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/currencies", srv.handleCurrencies)
 			r.Get("/time-zones", srv.handleTimeZones)
+
+			r.Get("/public/reports", srv.handlePublicReport)
 			r.Group(func(r chi.Router) {
 				r.Use(apiAuth)
 				r.Get("/users/me", srv.handleUsersMe)
@@ -120,6 +122,12 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/organizations/{organization}/tasks", srv.handleStoreTask)
 				r.Put("/organizations/{organization}/tasks/{task}", srv.handleUpdateTask)
 				r.Delete("/organizations/{organization}/tasks/{task}", srv.handleDestroyTask)
+
+				r.Get("/organizations/{organization}/reports", srv.handleListReports)
+				r.Get("/organizations/{organization}/reports/{report}", srv.handleShowReport)
+				r.Post("/organizations/{organization}/reports", srv.handleStoreReport)
+				r.Put("/organizations/{organization}/reports/{report}", srv.handleUpdateReport)
+				r.Delete("/organizations/{organization}/reports/{report}", srv.handleDeleteReport)
 
 				// Time entries — order matters: literal segments before {timeEntry}.
 				r.Get("/organizations/{organization}/time-entries", srv.handleListTimeEntries)
@@ -209,6 +217,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			srv.handleAcceptInvitation(w, r, true)
 		})
 
+		// Public shared report page (upstream web.php /shared-report).
+		r.Get("/shared-report", srv.handleSharedReportPage)
+
 		// Signed export downloads — Laravel local-disk temporaryUrl port.
 		r.Get("/exports/{file}", srv.handleExportDownload)
 
@@ -231,6 +242,29 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Post("/user/two-factor-recovery-codes", srv.handleRegenerateRecoveryCodes)
 			r.Get("/user/profile", srv.handleProfileShow)
 			r.With(srv.requireVerified).Get("/dashboard", srv.handleDashboard)
+			r.With(srv.requireVerified).Get("/time", srv.renderPage("Time"))
+			r.With(srv.requireVerified).Get("/calendar", srv.renderPage("Calendar"))
+			r.With(srv.requireVerified).Get("/timesheet", srv.renderPage("Timesheet"))
+			r.With(srv.requireVerified).Get("/reporting", srv.renderPage("Reporting"))
+			r.With(srv.requireVerified).Get("/reporting/detailed", srv.renderPage("ReportingDetailed"))
+			r.With(srv.requireVerified).Get("/reporting/shared", srv.renderPage("ReportingShared"))
+			r.With(srv.requireVerified).Get("/goals", srv.renderPage("Goals"))
+			r.With(srv.requireVerified).Get("/projects", srv.renderPage("Projects"))
+			r.With(srv.requireVerified).Get("/projects/{project}", srv.renderPage("ProjectShow"))
+			r.With(srv.requireVerified).Get("/clients", srv.renderPage("Clients"))
+			r.With(srv.requireVerified).Get("/members", srv.handleMembersPage)
+			r.With(srv.requireVerified).Get("/tags", srv.renderPage("Tags"))
+			r.With(srv.requireVerified).Get("/import", srv.renderPage("Import"))
+			r.With(srv.requireVerified).Get("/organizations/create", srv.handleTeamCreatePage)
+			r.With(srv.requireVerified).Get("/organizations/{organizationId}", srv.handleTeamShowPage)
+			r.With(srv.requireVerified).Get("/teams/create", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/organizations/create", http.StatusFound)
+			})
+			r.With(srv.requireVerified).Get("/teams/{organizationId}", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/organizations/"+chi.URLParam(r, "organizationId"), http.StatusFound)
+			})
+			r.Delete("/user/other-browser-sessions", srv.handleLogoutOtherSessions)
+			r.Get("/users/{user}/verify-email-change", srv.handleVerifyEmailChange)
 		})
 
 		r.NotFound(spaFallback)
