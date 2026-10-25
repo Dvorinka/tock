@@ -43,10 +43,19 @@ func (s *spaHandler) Render(w http.ResponseWriter, r *http.Request, component st
 		http.Error(w, "render page", http.StatusInternalServerError)
 		return
 	}
+	origin := strings.TrimRight(s.appURL, "/")
+	if origin == "" {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		origin = scheme + "://" + r.Host
+	}
+
 	var out strings.Builder
 	err = shellTemplate.Execute(&out, map[string]any{
 		"Title":  "tock",
-		"Ziggy":  ziggyJS(),
+		"Ziggy":  ziggyJS(origin),
 		"Script": s.entryFile,
 		"Styles": s.entryCSS,
 		"Page":   string(pageJSON),

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"html/template"
+	"strings"
 	"sync"
 )
 
@@ -22,7 +23,9 @@ type ziggyRoute struct {
 }
 
 func webRoute(methods []string, uri string, params ...string) ziggyRoute {
-	r := ziggyRoute{URI: uri, Methods: methods}
+	// Ziggy joins url + '/' + uri — Laravel route URIs have no leading slash,
+	// a leading one produces '//forgot-password' and misses the chi route.
+	r := ziggyRoute{URI: strings.TrimPrefix(uri, "/"), Methods: methods}
 	for _, p := range params {
 		r.Parameters = append(r.Parameters, ziggyParameter{Name: p, Required: true})
 	}
@@ -36,7 +39,7 @@ func webRoute(methods []string, uri string, params ...string) ziggyRoute {
 //nolint:gochecknoglobals // static route table
 var spaRouteManifest = map[string]ziggyRoute{
 	// application pages
-	"dashboard":          webRoute([]string{"GET", "HEAD"}, "/"),
+	"dashboard":          webRoute([]string{"GET", "HEAD"}, "/dashboard"),
 	"time":               webRoute([]string{"GET", "HEAD"}, "/time"),
 	"calendar":           webRoute([]string{"GET", "HEAD"}, "/calendar"),
 	"timesheet":          webRoute([]string{"GET", "HEAD"}, "/timesheet"),
@@ -96,20 +99,29 @@ var spaRouteManifest = map[string]ziggyRoute{
 	),
 }
 
-// ziggyJS is the Ziggy route config injected into the SPA shell. It replaces
-// the upstream `@routes` Blade directive: without it every `route('…')` call
-// throws "route is not in the route list".
+// ziggyRoutesJSON is the static part of the Ziggy route config injected into
+// the SPA shell. It replaces the upstream `@routes` Blade directive: without
+// it every `route('…')` call throws "route is not in the route list".
 //
 //nolint:gochecknoglobals // computed once from the static table
-var ziggyJS = sync.OnceValue(func() template.JS {
-	payload, err := json.Marshal(map[string]any{
-		"url":      "",
-		"port":     nil,
-		"defaults": map[string]any{},
-		"routes":   spaRouteManifest,
-	})
+var ziggyRoutesJSON = sync.OnceValue(func() json.RawMessage {
+	payload, err := json.Marshal(spaRouteManifest)
 	if err != nil {
-		return template.JS(`{"url":"","port":null,"defaults":{},"routes":{}}`) //nolint:gosec // constant
+		return json.RawMessage(`{}`)
 	}
-	return template.JS(payload) //nolint:gosec // JSON we produced
+	return payload
 })
+
+// ziggyJS builds the Ziggy config for one shell render. `url` must be the app
+// origin — ziggy-js treats an empty url as a host-less base and generates
+// broken absolute links like `http://forgot-password/`.
+func ziggyJS(origin string) template.JS {
+	urlJSON, _ := json.Marshal(origin)
+	var b strings.Builder
+	b.WriteString(`{"url":`)
+	b.Write(urlJSON)
+	b.WriteString(`,"port":null,"defaults":{},"routes":`)
+	b.Write(ziggyRoutesJSON())
+	b.WriteByte('}')
+	return template.JS(b.String()) //nolint:gosec // JSON we produced
+}
