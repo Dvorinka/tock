@@ -38,10 +38,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # PHP composer vendor/ would trigger Go vendor mode — disable until Phase 9.
-  GOFLAGS: -mod=mod
-
 jobs:
   test:
     runs-on: ubuntu-latest
