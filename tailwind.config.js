@@ -7,11 +7,6 @@ import { solidtimeTheme } from './resources/js/packages/ui/tailwind.theme.js';
 export default {
     darkMode: ['selector', '.dark'],
     content: [
-        './extensions/Invoicing/resources/js/**/*.vue',
-        './vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php',
-        './vendor/laravel/jetstream/**/*.blade.php',
-        './storage/framework/views/*.php',
-        './resources/views/**/*.blade.php',
         './resources/js/**/*.vue',
         './resources/js/**/*.ts',
         '!./resources/js/**/node_modules',
@@ -20,7 +15,7 @@ export default {
         extend: {
             ...solidtimeTheme,
             fontFamily: {
-                sans: ['Inter', ...defaultTheme.fontFamily.sans],
+                sans: ['Space Grotesk', ...defaultTheme.fontFamily.sans],
             },
         },
     },
