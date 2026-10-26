@@ -251,7 +251,7 @@ func (s *Server) handleStoreReport(w http.ResponseWriter, r *http.Request) {
 	errs := map[string][]string{}
 	name, namePresent, nameValid := jsonStr(body, "name")
 	switch {
-	case !namePresent:
+	case !namePresent || len(name) < 1:
 		errs["name"] = []string{"The name field is required."}
 	case !nameValid:
 		errs["name"] = []string{"The name must be a string."}
