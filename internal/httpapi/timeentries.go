@@ -550,9 +550,7 @@ func (s *Server) validateTimeEntryBody(w http.ResponseWriter, r *http.Request, s
 		resultingType = existing.Type
 		v.entryType = existing.Type
 	} else {
-		if required {
-			errs["type"] = []string{"The type field is required."}
-		}
+		// Upstream defaults absent type to 'work' — not required on create.
 		resultingType = timeEntryTypeWork
 	}
 	isBreak := resultingType == timeEntryTypeBreak
