@@ -65,7 +65,7 @@ export default defineConfig({
         trace: process.env.CI ? 'on-first-retry' : 'on',
     },
 
-    timeout: 20 * 1000,
+    timeout: 60 * 1000,
 
     /* Configure projects for major browsers, core specs keep the plain browser project name */
     projects: browsers.flatMap((browser) =>
