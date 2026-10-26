@@ -168,7 +168,7 @@ func decodeJSONMap(r *http.Request) (map[string]json.RawMessage, bool) {
 
 func jsonStr(m map[string]json.RawMessage, key string) (string, bool, bool) {
 	raw, ok := m[key]
-	if !ok {
+	if !ok || string(raw) == "null" {
 		return "", false, false
 	}
 	var s string
@@ -181,7 +181,7 @@ func jsonStr(m map[string]json.RawMessage, key string) (string, bool, bool) {
 // jsonBool reads an optional bool field (Laravel 'boolean' accepts true/false/1/0/"1"/"0").
 func jsonBool(m map[string]json.RawMessage, key string) (bool, bool, bool) {
 	raw, ok := m[key]
-	if !ok {
+	if !ok || string(raw) == "null" {
 		return false, false, false
 	}
 	var b bool

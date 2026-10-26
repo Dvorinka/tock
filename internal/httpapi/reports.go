@@ -688,6 +688,9 @@ func rawString(raw json.RawMessage) (string, bool) {
 }
 
 func rawBool(raw json.RawMessage) (bool, bool) {
+	if string(raw) == "null" {
+		return false, false
+	}
 	var v bool
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return false, false
