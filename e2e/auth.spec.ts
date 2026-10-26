@@ -28,6 +28,9 @@ test('can register, logout and log back in', async ({ page }) => {
     await page.getByText('Log Out').click();
     await page.waitForURL(PLAYWRIGHT_BASE_URL + '/login');
     await page.goto(PLAYWRIGHT_BASE_URL + '/login');
+    // Second goto can race Vue hydration — fills typed before v-model
+    // binds are overwritten by the empty model on mount.
+    await page.waitForLoadState('networkidle');
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Log in' }).click();
@@ -46,6 +49,9 @@ test('can register and delete account', async ({ page }) => {
     await page.getByRole('dialog').getByRole('button', { name: 'Delete Account' }).click();
     await page.waitForURL(PLAYWRIGHT_BASE_URL + '/login');
     await page.goto(PLAYWRIGHT_BASE_URL + '/login');
+    // Second goto can race Vue hydration — fills typed before v-model
+    // binds are overwritten by the empty model on mount.
+    await page.waitForLoadState('networkidle');
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Log in' }).click();
