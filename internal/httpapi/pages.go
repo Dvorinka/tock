@@ -78,9 +78,11 @@ func (s *Server) handleTeamShowPage(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	currencies := []string{}
+	// Upstream sends currencies as a {code: translated-name} map — the select
+	// keys options by code.
+	currencies := map[string]string{}
 	for _, c := range domain.CurrencyList() {
-		currencies = append(currencies, c.Name)
+		currencies[c.Code] = c.Name
 	}
 	s.spa.Render(w, r, "Teams/Show", map[string]any{
 		"team": map[string]any{
