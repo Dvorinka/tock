@@ -276,7 +276,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
-		Remember bool   `json:"remember"`
+		// Inertia sends the checkbox as 'on'/'' (Laravel boolean-ish), not a bool.
+		Remember string `json:"remember"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		backWithErrors(w, r, map[string]string{"email": "These credentials do not match our records."}, "/login")
@@ -290,11 +291,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 	if u.TwoFactorSecret != nil && u.TwoFactorConfirmedAt != nil {
 		sess.Set("login.id", u.ID)
-		sess.Set("login.remember", body.Remember)
+		sess.Set("login.remember", body.Remember == "on")
 		Redirect(w, r, "/two-factor-challenge")
 		return
 	}
-	s.login(w, r, u, body.Remember)
+	s.login(w, r, u, body.Remember == "on")
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {

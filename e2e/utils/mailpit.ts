@@ -76,7 +76,10 @@ export async function getPasswordResetUrl(
     expect(searchResult.messages.length).toBeGreaterThan(0);
 
     const message = await getMessage(request, searchResult.messages[0].ID);
-    const resetUrlMatch = message.HTML.match(/href="([^"]*reset-password[^"]*)"/);
+    // tock sends a plain-text mail for now; search both bodies like the
+    // verification helper does.
+    const body = `${message.HTML ?? ''}\n${message.Text ?? ''}`;
+    const resetUrlMatch = body.match(/(https?:\/\/[^\s"'<>]*\/reset-password\/[^\s"'<>]+)/);
     expect(resetUrlMatch).toBeTruthy();
 
     return resetUrlMatch![1].replace(/&amp;/g, '&');
