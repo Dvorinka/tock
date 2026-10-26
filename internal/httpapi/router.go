@@ -270,6 +270,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Post("/reset-password", srv.handleReset)
 		})
 		r.Post("/logout", srv.handleLogout)
+		r.Put("/current-team", srv.handleSwitchTeam)
 		r.Get("/two-factor-challenge", srv.handleTwoFactorChallengeForm)
 		r.Post("/two-factor-challenge", srv.handleTwoFactorChallenge)
 

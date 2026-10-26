@@ -163,6 +163,39 @@ func (s *Server) handleMyMemberships(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
+// handleSwitchTeam is the Jetstream org-switch contract (PUT /current-team,
+// {team_id}) — same member-check + current_team_id update as the API route.
+func (s *Server) handleSwitchTeam(w http.ResponseWriter, r *http.Request) {
+	u := apiUser(w, r)
+	if u == nil {
+		return
+	}
+	var body struct {
+		TeamID string `json:"team_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TeamID == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"message": "The team id field is required.",
+			"errors":  map[string][]string{"team_id": {"The team id field is required."}},
+		})
+		return
+	}
+	var exists bool
+	if err := s.pool.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM members WHERE user_id = $1 AND organization_id = $2)`,
+		u.ID, body.TeamID).Scan(&exists); err != nil || !exists {
+		writeMessage(w, http.StatusForbidden, "This action is unauthorized.")
+		return
+	}
+	if _, err := s.pool.Exec(r.Context(),
+		`UPDATE users SET current_team_id = $1, updated_at = now() WHERE id = $2`,
+		body.TeamID, u.ID); err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": body.TeamID}})
+}
+
 func (s *Server) handleUpdateCurrentOrganization(w http.ResponseWriter, r *http.Request) {
 	u := apiUser(w, r)
 	if u == nil {
