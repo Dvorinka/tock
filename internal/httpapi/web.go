@@ -432,6 +432,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	if len(orgs) > 0 {
+		// The invitation link already proved email ownership — upstream
+		// verifies invited registrants instead of forcing the verify step.
+		if _, err = tx.Exec(r.Context(),
+			`UPDATE users SET email_verified_at = now() WHERE id = $1`, uid); err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+	}
 	if len(orgs) == 0 {
 		if err := s.domain.MakeSureUserHasAtLeastOneOrganization(r.Context(), qtx, uid, body.Name); err != nil {
 			writeMessage(w, http.StatusInternalServerError, "server error")
@@ -443,7 +452,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := s.loadUser(r.Context(), userID)
-	_ = s.sendVerificationEmail(r, u)
+	if u != nil && u.EmailVerifiedAt == nil {
+		_ = s.sendVerificationEmail(r, u)
+	}
 	s.login(w, r, u, false)
 }
 
