@@ -99,13 +99,13 @@ func groupByQuery(group, shifted, weekAnchor string) string {
 	case "year":
 		return "to_char(" + shifted + ", 'YYYY')"
 	case "user":
-		return "user_id::text"
+		return `((select u.name from members m join users u on u.id = m.user_id where m.id = time_entries.member_id)::text)`
 	case "project":
-		return "project_id::text"
+		return `((select p.name from projects p where p.id = time_entries.project_id)::text)`
 	case "task":
-		return "task_id::text"
+		return `((select t.name from tasks t where t.id = time_entries.task_id)::text)`
 	case "client":
-		return "client_id::text"
+		return `((select c.name from clients c where c.id = (select p.client_id from projects p where p.id = time_entries.project_id))::text)`
 	case "billable":
 		return "billable::int"
 	case "type":
