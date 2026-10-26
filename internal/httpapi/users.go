@@ -222,8 +222,11 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	errs := map[string][]string{}
 	if body.Name != nil {
 		name = *body.Name
-		if name == "" {
+		switch {
+		case name == "":
 			errs["name"] = []string{"The name field is required."}
+		case len(name) > 255:
+			errs["name"] = []string{"The name field must not be greater than 255 characters."}
 		}
 	}
 	if body.Email != nil {
@@ -346,7 +349,7 @@ func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": u.ID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleResendVerification(w http.ResponseWriter, r *http.Request) {

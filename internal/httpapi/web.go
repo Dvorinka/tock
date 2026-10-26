@@ -628,11 +628,20 @@ func (s *Server) handleConfirmPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = decodeBody(r, &body)
 	if u == nil || u.Password == nil || !auth.CheckPassword(*u.Password, body.Password) {
+		if r.Header.Get("X-Inertia") == "" {
+			// Jetstream's axios confirm modal expects the Laravel 422 shape.
+			validationErr(w, map[string][]string{"password": {"The password is incorrect."}})
+			return
+		}
 		backWithErrors(w, r, map[string]string{"password": "The password is incorrect."}, "/user/confirm-password")
 		return
 	}
 	sess := auth.SessionFromContext(r.Context())
 	sess.Set("auth.password_confirmed_at", time.Now().Unix())
+	if r.Header.Get("X-Inertia") == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"message": ""})
+		return
+	}
 	Redirect(w, r, "/dashboard")
 }
 
