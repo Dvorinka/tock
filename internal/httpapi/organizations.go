@@ -21,6 +21,7 @@ import (
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
+	"github.com/Dvorinka/tock/internal/jobs"
 	"github.com/Dvorinka/tock/internal/importer"
 )
 
@@ -989,6 +990,13 @@ func (s *Server) sendInvitationMail(r *http.Request, inv db.OrganizationInvitati
 	body := "You have been invited to join the " + org.Name + " organization!\n\n" +
 		"Accept Invitation: " + url + "\n\n" +
 		"If you did not expect to receive an invitation to this organization, you may discard this email."
+	htmlBody := "<p>You have been invited to join the " + org.Name + " organization!</p>" +
+		`<p><a href="` + url + `">Accept Invitation</a></p>` +
+		"<p>If you did not expect to receive an invitation to this organization, you may discard this email.</p>"
+	if s.pool != nil {
+		_ = jobs.EnqueueMailHTML(r.Context(), s.pool, inv.Email, "Organization Invitation", body, htmlBody)
+		return
+	}
 	_ = s.sendMail(r.Context(), inv.Email, "Organization Invitation", body)
 }
 
