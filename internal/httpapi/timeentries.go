@@ -6,6 +6,7 @@ package httpapi
 // is assembled here with bound parameters rather than sqlc.
 
 import (
+	"log/slog"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -535,6 +536,7 @@ type teVals struct {
 func (s *Server) validateTimeEntryBody(w http.ResponseWriter, r *http.Request, scope *orgScope, body map[string]json.RawMessage, existing *db.TimeEntry, required bool) (map[string][]string, *teVals) {
 	errs := map[string][]string{}
 	v := &teVals{entryType: timeEntryTypeWork}
+	defer func() { if len(errs) > 0 { slog.WarnContext(r.Context(), "te validation", "errs", errs) } }()
 	q := db.New(s.pool)
 
 	resultingType := ""

@@ -223,7 +223,9 @@ func (s *Server) goalTrackedSeconds(ctx context.Context, goal goalRecord, period
 		f.addIDList("member_id", parseIDListStr(derefList(filters.MemberIDs)))
 	}
 
-	query := `SELECT coalesce(round(sum(extract(epoch from (coalesce("end", ` + f.arg(now) +
+	// now must be UTC — "end" is a naive timestamp; a local-time arg would
+	// add the tz offset to the running-entry duration.
+	query := `SELECT coalesce(round(sum(extract(epoch from (coalesce("end", ` + f.arg(now.UTC()) +
 		`::timestamp) - "start")))), 0)::bigint FROM time_entries WHERE ` + f.whereClause()
 	var tracked int64
 	if err := s.pool.QueryRow(ctx, query, f.args...).Scan(&tracked); err != nil {
