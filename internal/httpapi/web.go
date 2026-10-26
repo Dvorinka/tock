@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/skip2/go-qrcode"
 	"html/template"
 	"net/http"
 	"net/smtp"
@@ -1035,8 +1037,13 @@ func newUUID() string {
 // qrSVG renders a minimal QR placeholder — see shortcut note.
 // shortcut: emits the otpauth URL for manual entry; real QR rasterization
 // lands with a qrcode dependency if the FE needs the SVG.
-func qrSVG(_ string) string {
-	return ""
+func qrSVG(data string) string {
+	png, err := qrcode.Encode(data, qrcode.Medium, 256)
+	if err != nil {
+		return ""
+	}
+	// BaconQrCode upstream emits an <svg>; img data-URL renders identically.
+	return fmt.Sprintf("<img src='data:image/png;base64,%s' alt='QR code'>", base64.StdEncoding.EncodeToString(png))
 }
 
 var _ = pgx.ErrNoRows
