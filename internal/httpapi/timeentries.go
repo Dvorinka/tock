@@ -185,7 +185,7 @@ func (f *teFilter) addTagFilter(l idList, matchType string) {
 	}
 	parts := []string{}
 	for _, id := range l.ids {
-		parts = append(parts, "tags @> to_jsonb("+f.arg(domain.UUIDString(id))+")")
+		parts = append(parts, "tags @> to_jsonb("+f.arg(domain.UUIDString(id))+"::text)")
 	}
 	if l.none {
 		parts = append(parts, "(coalesce(jsonb_array_length(tags), 0) = 0)")
