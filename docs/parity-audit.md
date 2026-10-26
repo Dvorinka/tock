@@ -26,3 +26,10 @@ Bugs found via the suite, all fixed:
 - spec-side: verify-flow helper, reset regex searches Text body, networkidle
   before post-logout fills (hydration race), duplicate-email text matched
   upstream's "has already been taken".
+
+## Profile spec — GREEN on tock (36/36)
+Notable fixes found via the suite: partial PUT users, X-Inertia-Error-Bag,
+ui-avatars default + photo upload + /storage serve, verify-email-change
+mail + resend + lowercase, Jetstream sessions prop, static 2FA feature
+flag, 204s, Laravel 422 shape (first error in message), axios confirm-
+password shape, name max:255, real QR image (was empty placeholder).
