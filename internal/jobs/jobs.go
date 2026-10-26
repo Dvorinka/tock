@@ -101,7 +101,8 @@ func (w *Worker) tick(ctx context.Context) (bool, error) {
 		UPDATE jobs SET reserved_at = $1, attempts = attempts + 1
 		WHERE id = (
 			SELECT id FROM jobs
-			WHERE reserved_at IS NULL AND available_at <= $1
+			WHERE (reserved_at IS NULL OR reserved_at < $1 - 90)
+			  AND available_at <= $1
 			ORDER BY id LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		)
