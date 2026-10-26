@@ -1304,7 +1304,14 @@ func (s *Server) handleDestroyMultipleTimeEntries(w http.ResponseWriter, r *http
 	var payload struct {
 		IDs []string `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || len(payload.IDs) == 0 {
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+	if len(payload.IDs) == 0 {
+		// Upstream DELETE /time-entries sends ids as a query array
+		// (?ids=x&ids=y or Laravel ?ids[]=x).
+		payload.IDs = append(payload.IDs, r.URL.Query()["ids"]...)
+		payload.IDs = append(payload.IDs, r.URL.Query()["ids[]"]...)
+	}
+	if len(payload.IDs) == 0 {
 		validationErr(w, map[string][]string{"ids": {"The ids field is required."}})
 		return
 	}
