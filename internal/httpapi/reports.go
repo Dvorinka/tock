@@ -322,7 +322,7 @@ func (s *Server) handleStoreReport(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": s.reportResource(rep, true)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": s.reportResource(rep, true)})
 }
 
 // parseReportProperties ports ReportStoreRequest's nested properties rules.
