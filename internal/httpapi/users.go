@@ -134,31 +134,46 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auditBefore := authUserAttrs(*u)
+	// Upstream UpdateUserRequest validates 'sometimes' — absent fields keep
+	// current values; the SPA sends only changed fields.
 	var body struct {
-		Name                  string `json:"name"`
-		Email                 string `json:"email"`
-		Timezone              string `json:"timezone"`
-		WeekStart             string `json:"week_start"`
-		SendStillRunningEmail *bool  `json:"send_time_entry_still_running_email"`
+		Name                  *string `json:"name"`
+		Email                 *string `json:"email"`
+		Timezone              *string `json:"timezone"`
+		WeekStart             *string `json:"week_start"`
+		SendStillRunningEmail *bool   `json:"send_time_entry_still_running_email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeMessage(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	name, email, timezone, weekStart := u.Name, u.Email, u.Timezone, u.WeekStart
 	errs := map[string][]string{}
-	if body.Name == "" {
-		errs["name"] = []string{"The name field is required."}
+	if body.Name != nil {
+		name = *body.Name
+		if name == "" {
+			errs["name"] = []string{"The name field is required."}
+		}
 	}
-	if body.Email == "" || !strings.Contains(body.Email, "@") {
-		errs["email"] = []string{"The email field must be a valid email address."}
+	if body.Email != nil {
+		email = *body.Email
+		if email == "" || !strings.Contains(email, "@") {
+			errs["email"] = []string{"The email field must be a valid email address."}
+		}
 	}
-	if body.Timezone == "" {
-		errs["timezone"] = []string{"The timezone field is required."}
+	if body.Timezone != nil {
+		timezone = *body.Timezone
+		if timezone == "" {
+			errs["timezone"] = []string{"The timezone field is required."}
+		}
 	}
-	switch body.WeekStart {
-	case "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday":
-	default:
-		errs["week_start"] = []string{"The selected week start is invalid."}
+	if body.WeekStart != nil {
+		weekStart = *body.WeekStart
+		switch weekStart {
+		case "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday":
+		default:
+			errs["week_start"] = []string{"The selected week start is invalid."}
+		}
 	}
 	if len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
@@ -168,7 +183,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// Email change goes through pending_email + verification (upstream behavior).
 	pending := u.PendingEmail
-	if !strings.EqualFold(body.Email, u.Email) {
+	if body.Email != nil && !strings.EqualFold(email, u.Email) {
 		var taken bool
 		_ = s.pool.QueryRow(r.Context(),
 			`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)`,
@@ -180,7 +195,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		pending = &body.Email
+		pending = &email
 	}
 	sendMail := u.SendStillRunningEmail
 	if body.SendStillRunningEmail != nil {
@@ -190,11 +205,11 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		UPDATE users SET name = $2, timezone = $3, week_start = $4,
 			send_time_entry_still_running_email = $5, pending_email = $6, updated_at = now()
 		WHERE id = $1`,
-		u.ID, body.Name, body.Timezone, body.WeekStart, sendMail, pending); err != nil {
+		u.ID, name, timezone, weekStart, sendMail, pending); err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = body.Name, body.Timezone, body.WeekStart, pending
+	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = name, timezone, weekStart, pending
 	u.SendStillRunningEmail = sendMail
 	s.recordAudit(r, audit.EventUpdated, audit.TypeUser, uuidOrZero(u.ID), pgtype.UUID{}, uuidOrZero(u.ID), auditBefore, authUserAttrs(*u))
 	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
