@@ -288,6 +288,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		// Signed export downloads — Laravel local-disk temporaryUrl port.
 		r.Get("/exports/{file}", srv.handleExportDownload)
 
+		// Public uploaded assets (Laravel storage symlink).
+		r.Get("/storage/profile-photos/{file}", srv.handleStorageFile)
+
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuth)
 			r.Get("/email/verify", srv.handleVerifyNotice)

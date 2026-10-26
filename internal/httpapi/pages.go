@@ -90,7 +90,7 @@ func (s *Server) handleTeamShowPage(w http.ResponseWriter, r *http.Request) {
 			"owner": map[string]any{
 				"id":                domain.UUIDString(owner.ID),
 				"name":              owner.Name,
-				"profile_photo_url": gravatarURL(owner.Email),
+				"profile_photo_url": avatarURL(owner.Name),
 			},
 		},
 		"currencies": currencies,

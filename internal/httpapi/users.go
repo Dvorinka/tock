@@ -1,10 +1,17 @@
 package httpapi
 
 import (
-	"crypto/md5"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,18 +23,81 @@ import (
 	"github.com/Dvorinka/tock/internal/domain"
 )
 
-func gravatarURL(email string) string {
-	sum := md5.Sum([]byte(strings.ToLower(strings.TrimSpace(email))))
-	return "https://www.gravatar.com/avatar/" + hex.EncodeToString(sum[:]) + "?d=mp"
+// avatarURL returns the default avatar — upstream uses ui-avatars.com with
+// the user's initials (the SPA keys "has uploaded photo" on the absence of
+// the ui-avatars substring).
+func avatarURL(name string) string {
+	initials := ""
+	for _, part := range strings.Fields(strings.TrimSpace(name)) {
+		initials += strings.ToUpper(string([]rune(part)[0]))
+		if len(initials) >= 2 {
+			break
+		}
+	}
+	if initials == "" {
+		initials = "?"
+	}
+	return "https://ui-avatars.com/api/?name=" + url.QueryEscape(initials)
 }
 
-func userResource(u *auth.User) map[string]any {
+// photoURL resolves profile_photo_url: stored upload when present, else the
+// ui-avatars default upstream emits (SPA detects uploads by its absence).
+func photoURL(appURL string, u *auth.User) string {
+	if u.ProfilePhotoPath != nil && *u.ProfilePhotoPath != "" {
+		return strings.TrimRight(appURL, "/") + "/storage/" + *u.ProfilePhotoPath
+	}
+	return avatarURL(u.Name)
+}
+
+// saveProfilePhoto decodes a data-URL upload into storageDir/profile-photos
+// and returns the storage-relative path (served at /storage/<path>).
+func (s *Server) saveProfilePhoto(userID, dataURL string) (string, error) {
+	const prefix = "data:image/"
+	if !strings.HasPrefix(dataURL, prefix) {
+		return "", fmt.Errorf("not an image data url")
+	}
+	rest := dataURL[len(prefix):]
+	semi := strings.Index(rest, ";base64,")
+	if semi < 0 {
+		return "", fmt.Errorf("not base64")
+	}
+	ext := rest[:semi]
+	if ext == "jpeg" {
+		ext = "jpg"
+	}
+	raw, err := base64.StdEncoding.DecodeString(rest[semi+8:])
+	if err != nil || len(raw) == 0 || len(raw) > 5<<20 {
+		return "", fmt.Errorf("bad image payload")
+	}
+	dir := filepath.Join(s.storageDir, "profile-photos")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := userID + "." + ext
+	if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+		return "", err
+	}
+	return "profile-photos/" + name, nil
+}
+
+// handleStorageFile serves uploaded public assets (profile photos) — the
+// Laravel `storage:link` equivalent.
+func (s *Server) handleStorageFile(w http.ResponseWriter, r *http.Request) {
+	file := chi.URLParam(r, "file")
+	if strings.Contains(file, "/") || strings.Contains(file, "..") || file == "" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(s.storageDir, "profile-photos", file))
+}
+
+func (s *Server) userResource(u *auth.User) map[string]any {
 	return map[string]any{
 		"id":                                  u.ID,
 		"name":                                u.Name,
 		"email":                               u.Email,
 		"pending_email":                       u.PendingEmail,
-		"profile_photo_url":                   gravatarURL(u.Email),
+		"profile_photo_url":                   photoURL(s.appURL, u),
 		"timezone":                            u.Timezone,
 		"week_start":                          u.WeekStart,
 		"send_time_entry_still_running_email": u.SendStillRunningEmail,
@@ -59,7 +129,7 @@ func (s *Server) handleUsersMe(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.userResource(u)})
 }
 
 func (s *Server) handleMyMemberships(w http.ResponseWriter, r *http.Request) {
@@ -134,70 +204,124 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auditBefore := authUserAttrs(*u)
+	// Upstream UpdateUserRequest validates 'sometimes' — absent fields keep
+	// current values; the SPA sends only changed fields.
 	var body struct {
-		Name                  string `json:"name"`
-		Email                 string `json:"email"`
-		Timezone              string `json:"timezone"`
-		WeekStart             string `json:"week_start"`
-		SendStillRunningEmail *bool  `json:"send_time_entry_still_running_email"`
+		Name                  *string         `json:"name"`
+		Email                 *string         `json:"email"`
+		Timezone              *string         `json:"timezone"`
+		WeekStart             *string         `json:"week_start"`
+		SendStillRunningEmail *bool           `json:"send_time_entry_still_running_email"`
+		Photo                 json.RawMessage `json:"photo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeMessage(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	name, email, timezone, weekStart := u.Name, u.Email, u.Timezone, u.WeekStart
 	errs := map[string][]string{}
-	if body.Name == "" {
-		errs["name"] = []string{"The name field is required."}
+	if body.Name != nil {
+		name = *body.Name
+		switch {
+		case name == "":
+			errs["name"] = []string{"The name field is required."}
+		case len(name) > 255:
+			errs["name"] = []string{"The name field must not be greater than 255 characters."}
+		}
 	}
-	if body.Email == "" || !strings.Contains(body.Email, "@") {
-		errs["email"] = []string{"The email field must be a valid email address."}
+	if body.Email != nil {
+		email = *body.Email
+		if email == "" || !strings.Contains(email, "@") {
+			errs["email"] = []string{"The email field must be a valid email address."}
+		}
 	}
-	if body.Timezone == "" {
-		errs["timezone"] = []string{"The timezone field is required."}
+	if body.Timezone != nil {
+		timezone = *body.Timezone
+		if timezone == "" {
+			errs["timezone"] = []string{"The timezone field is required."}
+		}
 	}
-	switch body.WeekStart {
-	case "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday":
-	default:
-		errs["week_start"] = []string{"The selected week start is invalid."}
+	if body.WeekStart != nil {
+		weekStart = *body.WeekStart
+		switch weekStart {
+		case "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday":
+		default:
+			errs["week_start"] = []string{"The selected week start is invalid."}
+		}
 	}
 	if len(errs) > 0 {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"message": "The given data was invalid.", "errors": errs,
-		})
+		validationErr(w, errs)
 		return
 	}
 	// Email change goes through pending_email + verification (upstream behavior).
 	pending := u.PendingEmail
-	if !strings.EqualFold(body.Email, u.Email) {
+	emailChanged := false
+	if body.Email != nil && !strings.EqualFold(email, u.Email) {
 		var taken bool
 		_ = s.pool.QueryRow(r.Context(),
 			`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)`,
 			body.Email, u.ID).Scan(&taken)
 		if taken {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-				"message": "The given data was invalid.",
-				"errors":  map[string][]string{"email": {"The email has already been taken."}},
-			})
+			validationErr(w, map[string][]string{"email": {"The email has already been taken."}})
 			return
 		}
-		pending = &body.Email
+		lower := strings.ToLower(email)
+		pending = &lower
+		emailChanged = true
 	}
 	sendMail := u.SendStillRunningEmail
 	if body.SendStillRunningEmail != nil {
 		sendMail = *body.SendStillRunningEmail
 	}
+	photoPath := u.ProfilePhotoPath
+	if len(body.Photo) > 0 {
+		if string(body.Photo) == "null" {
+			photoPath = nil
+		} else {
+			var dataURL string
+			if err := json.Unmarshal(body.Photo, &dataURL); err != nil {
+				validationErr(w, map[string][]string{"photo": {"The photo field is invalid."}})
+				return
+			}
+			p, err := s.saveProfilePhoto(u.ID, dataURL)
+			if err != nil {
+				validationErr(w, map[string][]string{"photo": {"The photo field is invalid."}})
+				return
+			}
+			photoPath = &p
+		}
+	}
 	if _, err := s.pool.Exec(r.Context(), `
 		UPDATE users SET name = $2, timezone = $3, week_start = $4,
-			send_time_entry_still_running_email = $5, pending_email = $6, updated_at = now()
+			send_time_entry_still_running_email = $5, pending_email = $6,
+			profile_photo_path = $7, updated_at = now()
 		WHERE id = $1`,
-		u.ID, body.Name, body.Timezone, body.WeekStart, sendMail, pending); err != nil {
+		u.ID, name, timezone, weekStart, sendMail, pending, photoPath); err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = body.Name, body.Timezone, body.WeekStart, pending
+	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = name, timezone, weekStart, pending
+	u.ProfilePhotoPath = photoPath
 	u.SendStillRunningEmail = sendMail
 	s.recordAudit(r, audit.EventUpdated, audit.TypeUser, uuidOrZero(u.ID), pgtype.UUID{}, uuidOrZero(u.ID), auditBefore, authUserAttrs(*u))
-	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
+	if emailChanged && pending != nil {
+		s.sendEmailChangeVerification(r, u.ID, *pending)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.userResource(u)})
+}
+
+// sendEmailChangeVerification mails the signed verify-email-change link to
+// the new (pending) address — upstream "Verify Email Address" notification.
+func (s *Server) sendEmailChangeVerification(r *http.Request, userID, email string) {
+	expires := time.Now().Add(24 * time.Hour).Unix()
+	path := "/users/" + userID + "/verify-email-change"
+	qs := "email=" + url.QueryEscape(email) + "&expires=" + strconv.FormatInt(expires, 10)
+	mac := hmac.New(sha256.New, []byte(s.appKey))
+	mac.Write([]byte(path + "?" + qs))
+	link := s.appURL + path + "?" + qs + "&signature=" + hex.EncodeToString(mac.Sum(nil))
+	_ = s.sendMail(r.Context(), email, "Verify Email Address",
+		"Please click the button below to verify your new email address.\n\nVerify Email Address: "+link+
+			"\n\nIf you did not change your email address, no further action is required.")
 }
 
 func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
@@ -225,12 +349,19 @@ func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": u.ID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleResendVerification(w http.ResponseWriter, r *http.Request) {
 	u := apiUser(w, r)
 	if u == nil {
+		return
+	}
+	// A pending email change resends the change-verification to the new
+	// address, not the registration verification to the current one.
+	if u.PendingEmail != nil {
+		s.sendEmailChangeVerification(r, u.ID, *u.PendingEmail)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err := s.sendVerificationEmail(r, u); err != nil {
@@ -254,7 +385,7 @@ func (s *Server) handleResetPendingEmail(w http.ResponseWriter, r *http.Request)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": u.ID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 var _ = time.Now

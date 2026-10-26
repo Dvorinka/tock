@@ -61,6 +61,10 @@ export default defineConfig({
         /* Base URL to use in actions like `await page.goto('/')`. */
         // baseURL: 'http://127.0.0.1:3000',
 
+        /* Specs assume UTC — the timezone-mismatch modal opens otherwise
+           and hides the page from the a11y tree. */
+        timezoneId: 'UTC',
+
         /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
         trace: process.env.CI ? 'on-first-retry' : 'on',
     },
