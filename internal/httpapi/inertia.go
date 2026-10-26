@@ -126,7 +126,7 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 			"week_start":                          user.WeekStart,
 			"current_organization_id":             user.CurrentOrganizationID,
 			"send_time_entry_still_running_email": user.SendStillRunningEmail,
-			"two_factor_enabled":                  user.TwoFactorSecret != nil && user.TwoFactorConfirmedAt != nil,
+			"two_factor_enabled":                  user.TwoFactorSecret != nil,
 		}
 		// all_teams/current_team mirror Jetstream; the layout and the
 		// organization switcher read the current role from them.
