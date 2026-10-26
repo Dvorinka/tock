@@ -26,6 +26,7 @@ import (
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
 	"github.com/Dvorinka/tock/internal/importer"
+	"github.com/Dvorinka/tock/internal/jobs"
 	"github.com/Dvorinka/tock/internal/oauth2"
 )
 
@@ -48,9 +49,9 @@ type Server struct {
 
 func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool) *Server {
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
-		domain: domain.NewService(pool),
+		domain:   domain.NewService(pool),
 		importer: importer.New(pool, storageDir),
-		appURL: appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
+		appURL:   appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
 		gotenbergURL:  gotenbergURL,
 		secureCookies: secure, registration: registration}
 }
@@ -450,18 +451,25 @@ func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = decodeBody(r, &body)
 	sess := auth.SessionFromContext(r.Context())
-	if u, err := s.userByEmail(r.Context(), body.Email); err == nil {
-		token := auth.RandomToken(32)
-		sum := sha256.Sum256([]byte(token))
-		_, _ = s.pool.Exec(r.Context(), `
-			INSERT INTO password_reset_tokens (email, token, created_at)
-			VALUES ($1, $2, now())
-			ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
-			u.Email, hex.EncodeToString(sum[:]))
-		link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
-		_ = s.sendMail(u.Email, "Reset Password Notification",
-			"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
+	u, err := s.userByEmail(r.Context(), body.Email)
+	if err != nil {
+		// Upstream Fortify surfaces INVALID_USER on the form instead of a
+		// silent success.
+		backWithErrors(w, r, map[string]string{
+			"email": "We can't find a user with that email address.",
+		}, "/forgot-password")
+		return
 	}
+	token := auth.RandomToken(32)
+	sum := sha256.Sum256([]byte(token))
+	_, _ = s.pool.Exec(r.Context(), `
+		INSERT INTO password_reset_tokens (email, token, created_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
+		u.Email, hex.EncodeToString(sum[:]))
+	link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
+	_ = s.sendMail(r.Context(), u.Email, "Reset Password Notification",
+		"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
 	if sess != nil {
 		sess.Set("status", "We have emailed your password reset link.")
 	}
@@ -540,14 +548,18 @@ func (s *Server) verifySignedURL(r *http.Request) bool {
 
 func (s *Server) sendVerificationEmail(r *http.Request, u *auth.User) error {
 	link := s.signVerifyURL(u.ID, u.Email, time.Now().Add(24*time.Hour))
-	return s.sendMail(u.Email, "Verify Email Address",
+	return s.sendMail(r.Context(), u.Email, "Verify Email Address",
 		"Please click the button below to verify your email address.\n\nVerify Email Address: "+link+
 			"\n\nIf you did not create an account, no further action is required.")
 }
 
-func (s *Server) sendMail(to, subject, body string) error {
+func (s *Server) sendMail(ctx context.Context, to, subject, body string) error {
 	if s.smtpAddr == "" {
 		return nil // mail disabled
+	}
+	// Queue like upstream's queue driver — web requests must not block on SMTP.
+	if s.pool != nil {
+		return jobs.EnqueueMail(ctx, s.pool, to, subject, body)
 	}
 	msg := "From: " + s.mailFrom + "\r\nTo: " + to + "\r\nSubject: " + subject + "\r\n\r\n" + body + "\r\n"
 	return smtp.SendMail(s.smtpAddr, nil, s.mailFrom, []string{to}, []byte(msg))
