@@ -99,13 +99,13 @@ func groupByQuery(group, shifted, weekAnchor string) string {
 	case "year":
 		return "to_char(" + shifted + ", 'YYYY')"
 	case "user":
-		return "user_id::text"
+		return `user_id::text`
 	case "project":
-		return "project_id::text"
+		return `project_id::text`
 	case "task":
-		return "task_id::text"
+		return `task_id::text`
 	case "client":
-		return "client_id::text"
+		return `client_id::text`
 	case "billable":
 		return "billable::int"
 	case "type":
@@ -763,6 +763,7 @@ func (s *Server) handleAggregateTimeEntries(w http.ResponseWriter, r *http.Reque
 	result, err := s.aggregate(r.Context(), f, p.group1, p.group2, userTZ(u), u.WeekStart,
 		p.fillGaps, p.start, p.end, canSeeBillableRates(scope), p.roundingType, p.roundingMinutes, true)
 	if err != nil {
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
@@ -878,6 +879,7 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 	entries, err := s.queryTimeEntries(r.Context(), f, timeEntrySelectCols,
 		`ORDER BY start DESC, id`, 0, 0)
 	if err != nil {
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
@@ -902,7 +904,8 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 			return nil
 		})
 		if err != nil {
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
@@ -916,7 +919,8 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		totals, aggErr := s.aggregate(r.Context(), f, "", "", userTZ(u), u.WeekStart,
 			false, nil, nil, showBillable, "", 0, false)
 		if aggErr != nil {
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var buf bytes.Buffer
@@ -932,7 +936,8 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		}
 		if err := detailedPDFTemplate.Execute(&buf, data); err != nil {
 			slog.Error("detailed pdf template failed", "error", err)
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var footer bytes.Buffer
@@ -951,11 +956,13 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		slog.Error("export generation failed", "format", format, "error", err)
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
 	url, err := s.saveExportFile(filename, content)
 	if err != nil {
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
@@ -1069,6 +1076,7 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 	result, err := s.aggregate(r.Context(), f, p.group1, p.group2, userTZ(u), u.WeekStart,
 		false, p.start, p.end, showBillable, p.roundingType, p.roundingMinutes, true)
 	if err != nil {
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
@@ -1107,7 +1115,8 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 			return cw.Write(total)
 		})
 		if err != nil {
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
@@ -1122,14 +1131,16 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 		history, histErr := s.aggregate(r.Context(), histF, aggregationFromInterval(historyGroup), "",
 			userTZ(u), u.WeekStart, true, p.start, p.end, showBillable, p.roundingType, p.roundingMinutes, false)
 		if histErr != nil {
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		htmlData := s.aggPDFTemplateData(result, history, p.group1, p.group2, showBillable, loc, userTZ(u), r, debug)
 		var buf bytes.Buffer
 		if err := aggregatePDFTemplate.Execute(&buf, htmlData); err != nil {
 			slog.Error("aggregate pdf template failed", "error", err)
-			writeMessage(w, http.StatusInternalServerError, "server error")
+			slog.Error("aggregate error", "err", err)
+		writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var footer bytes.Buffer
@@ -1149,11 +1160,13 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 			return
 		}
 		slog.Error("export generation failed", "format", format, "error", err)
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
 	url, err := s.saveExportFile(filename, content)
 	if err != nil {
+		slog.Error("aggregate error", "err", err)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}

@@ -596,27 +596,25 @@ func (s *Server) handlePublicReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]any{
-			"name":            row.Name,
-			"description":     row.Description,
-			"public_until":    tsFormat(row.PublicUntil),
-			"currency":        row.Currency,
-			"number_format":   row.NumberFormat,
-			"currency_format": row.CurrencyFormat,
-			"currency_symbol": domain.CurrencySymbol(row.Currency),
-			"date_format":     row.DateFormat,
-			"interval_format": row.IntervalFormat,
-			"time_format":     row.TimeFormat,
-			"properties": map[string]any{
-				"group":         props.Group,
-				"sub_group":     props.SubGroup,
-				"history_group": props.HistoryGroup,
-				"start":         props.Start.UTC().Format("2006-01-02T15:04:05Z"),
-				"end":           props.End.UTC().Format("2006-01-02T15:04:05Z"),
-			},
-			"data":         data,
-			"history_data": historyData,
+		"name":            row.Name,
+		"description":     row.Description,
+		"public_until":    tsFormat(row.PublicUntil),
+		"currency":        row.Currency,
+		"number_format":   row.NumberFormat,
+		"currency_format": row.CurrencyFormat,
+		"currency_symbol": domain.CurrencySymbol(row.Currency),
+		"date_format":     row.DateFormat,
+		"interval_format": row.IntervalFormat,
+		"time_format":     row.TimeFormat,
+		"properties": map[string]any{
+			"group":         props.Group,
+			"sub_group":     props.SubGroup,
+			"history_group": props.HistoryGroup,
+			"start":         props.Start.UTC().Format("2006-01-02T15:04:05Z"),
+			"end":           props.End.UTC().Format("2006-01-02T15:04:05Z"),
 		},
+		"data":         data,
+		"history_data": historyData,
 	})
 }
 
@@ -688,6 +686,9 @@ func rawString(raw json.RawMessage) (string, bool) {
 }
 
 func rawBool(raw json.RawMessage) (bool, bool) {
+	if string(raw) == "null" {
+		return false, false
+	}
 	var v bool
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return false, false
