@@ -200,10 +200,13 @@ func (s *Server) requireVerified(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := auth.UserFromContext(r.Context())
 		if u != nil && u.EmailVerifiedAt == nil {
-			if r.Header.Get("X-Inertia") != "" {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
 				writeMessage(w, http.StatusConflict, "Your email address is not verified.")
 				return
 			}
+			// Inertia page requests (X-Inertia propagates through redirects)
+			// must get a real redirect like upstream's verified middleware —
+			// a 409 JSON lands on Inertia's "plain JSON" error modal.
 			http.Redirect(w, r, "/email/verify", http.StatusFound)
 			return
 		}
@@ -274,7 +277,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
-		Remember bool   `json:"remember"`
+		// Inertia sends the checkbox as 'on'/'' (Laravel boolean-ish), not a bool.
+		Remember string `json:"remember"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		backWithErrors(w, r, map[string]string{"email": "These credentials do not match our records."}, "/login")
@@ -288,11 +292,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 	if u.TwoFactorSecret != nil && u.TwoFactorConfirmedAt != nil {
 		sess.Set("login.id", u.ID)
-		sess.Set("login.remember", body.Remember)
+		sess.Set("login.remember", body.Remember == "on")
 		Redirect(w, r, "/two-factor-challenge")
 		return
 	}
-	s.login(w, r, u, body.Remember)
+	s.login(w, r, u, body.Remember == "on")
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {

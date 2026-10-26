@@ -3,12 +3,18 @@ import '../css/app.css';
 import { createApp, h } from 'vue';
 import { createInertiaApp, usePage } from '@inertiajs/vue3';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
-import { ZiggyVue } from 'ziggy-js';
+import { ZiggyVue, route } from 'ziggy-js';
 import { createPinia } from 'pinia';
 import type { User } from '@/types/models';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { type DefineComponent } from 'vue';
 import { setupPrefetching } from '@/utils/prefetch';
+
+// Ziggy config is injected into the shell as `const Ziggy` (replaces the
+// upstream @routes blade directive). Components call the route() helper as a
+// bare global, which the vendor bundle used to install on window.
+declare const Ziggy: Parameters<typeof ZiggyVue.install>[1];
+(window as Window & { route?: unknown }).route = route;
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 const pinia = createPinia();
@@ -64,7 +70,7 @@ createInertiaApp({
             return page.props.auth.user.timezone;
         };
 
-        app.use(plugin).use(pinia).use(ZiggyVue).use(VueQueryPlugin, { queryClient }).mount(el);
+        app.use(plugin).use(pinia).use(ZiggyVue, Ziggy).use(VueQueryPlugin, { queryClient }).mount(el);
 
         // Setup Inertia prefetching to warm TanStack Query cache
         setupPrefetching(queryClient);

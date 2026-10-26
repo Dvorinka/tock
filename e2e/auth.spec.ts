@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { PLAYWRIGHT_BASE_URL } from '../playwright/config';
-import { getPasswordResetUrl } from './utils/mailpit';
+import { getPasswordResetUrl, getEmailVerificationUrl } from './utils/mailpit';
 
 async function registerNewUser(page, email, password) {
     await page.goto(PLAYWRIGHT_BASE_URL + '/register');
@@ -10,6 +10,11 @@ async function registerNewUser(page, email, password) {
     await page.getByLabel('Confirm Password').fill(password);
     await page.getByLabel('I agree to the Terms of').click();
     await page.getByRole('button', { name: 'Register' }).click();
+    // Both apps land on the verify-email notice after registration —
+    // complete verification via the mailed link before the dashboard.
+    await page.waitForURL('**/email/verify');
+    const verifyUrl = await getEmailVerificationUrl(page.context().request, email);
+    await page.goto(verifyUrl);
     await expect(page.getByTestId('dashboard_view')).toBeVisible();
 }
 
@@ -23,6 +28,9 @@ test('can register, logout and log back in', async ({ page }) => {
     await page.getByText('Log Out').click();
     await page.waitForURL(PLAYWRIGHT_BASE_URL + '/login');
     await page.goto(PLAYWRIGHT_BASE_URL + '/login');
+    // Second goto can race Vue hydration — fills typed before v-model
+    // binds are overwritten by the empty model on mount.
+    await page.waitForLoadState('networkidle');
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Log in' }).click();
@@ -41,6 +49,9 @@ test('can register and delete account', async ({ page }) => {
     await page.getByRole('dialog').getByRole('button', { name: 'Delete Account' }).click();
     await page.waitForURL(PLAYWRIGHT_BASE_URL + '/login');
     await page.goto(PLAYWRIGHT_BASE_URL + '/login');
+    // Second goto can race Vue hydration — fills typed before v-model
+    // binds are overwritten by the empty model on mount.
+    await page.waitForLoadState('networkidle');
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Log in' }).click();
@@ -217,7 +228,7 @@ test('shows error when registering with existing email', async ({ page }) => {
     await page.getByRole('button', { name: 'Register' }).click();
 
     // Should show error about email already taken
-    await expect(page.getByText('The resource already exists.')).toBeVisible();
+    await expect(page.getByText('has already been taken')).toBeVisible();
 });
 
 test('shows validation error for weak password on registration', async ({ page }) => {
