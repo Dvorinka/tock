@@ -3,11 +3,15 @@ package httpapi
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
-	"net/url"
-	"strconv"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,13 +40,64 @@ func avatarURL(name string) string {
 	return "https://ui-avatars.com/api/?name=" + url.QueryEscape(initials)
 }
 
-func userResource(u *auth.User) map[string]any {
+// photoURL resolves profile_photo_url: stored upload when present, else the
+// ui-avatars default upstream emits (SPA detects uploads by its absence).
+func photoURL(appURL string, u *auth.User) string {
+	if u.ProfilePhotoPath != nil && *u.ProfilePhotoPath != "" {
+		return strings.TrimRight(appURL, "/") + "/storage/" + *u.ProfilePhotoPath
+	}
+	return avatarURL(u.Name)
+}
+
+// saveProfilePhoto decodes a data-URL upload into storageDir/profile-photos
+// and returns the storage-relative path (served at /storage/<path>).
+func (s *Server) saveProfilePhoto(userID, dataURL string) (string, error) {
+	const prefix = "data:image/"
+	if !strings.HasPrefix(dataURL, prefix) {
+		return "", fmt.Errorf("not an image data url")
+	}
+	rest := dataURL[len(prefix):]
+	semi := strings.Index(rest, ";base64,")
+	if semi < 0 {
+		return "", fmt.Errorf("not base64")
+	}
+	ext := rest[:semi]
+	if ext == "jpeg" {
+		ext = "jpg"
+	}
+	raw, err := base64.StdEncoding.DecodeString(rest[semi+8:])
+	if err != nil || len(raw) == 0 || len(raw) > 5<<20 {
+		return "", fmt.Errorf("bad image payload")
+	}
+	dir := filepath.Join(s.storageDir, "profile-photos")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := userID + "." + ext
+	if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+		return "", err
+	}
+	return "profile-photos/" + name, nil
+}
+
+// handleStorageFile serves uploaded public assets (profile photos) — the
+// Laravel `storage:link` equivalent.
+func (s *Server) handleStorageFile(w http.ResponseWriter, r *http.Request) {
+	file := chi.URLParam(r, "file")
+	if strings.Contains(file, "/") || strings.Contains(file, "..") || file == "" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(s.storageDir, "profile-photos", file))
+}
+
+func (s *Server) userResource(u *auth.User) map[string]any {
 	return map[string]any{
 		"id":                                  u.ID,
 		"name":                                u.Name,
 		"email":                               u.Email,
 		"pending_email":                       u.PendingEmail,
-		"profile_photo_url":                   avatarURL(u.Name),
+		"profile_photo_url":                   photoURL(s.appURL, u),
 		"timezone":                            u.Timezone,
 		"week_start":                          u.WeekStart,
 		"send_time_entry_still_running_email": u.SendStillRunningEmail,
@@ -74,7 +129,7 @@ func (s *Server) handleUsersMe(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.userResource(u)})
 }
 
 func (s *Server) handleMyMemberships(w http.ResponseWriter, r *http.Request) {
@@ -152,11 +207,12 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	// Upstream UpdateUserRequest validates 'sometimes' — absent fields keep
 	// current values; the SPA sends only changed fields.
 	var body struct {
-		Name                  *string `json:"name"`
-		Email                 *string `json:"email"`
-		Timezone              *string `json:"timezone"`
-		WeekStart             *string `json:"week_start"`
-		SendStillRunningEmail *bool   `json:"send_time_entry_still_running_email"`
+		Name                  *string         `json:"name"`
+		Email                 *string         `json:"email"`
+		Timezone              *string         `json:"timezone"`
+		WeekStart             *string         `json:"week_start"`
+		SendStillRunningEmail *bool           `json:"send_time_entry_still_running_email"`
+		Photo                 json.RawMessage `json:"photo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeMessage(w, http.StatusBadRequest, "invalid body")
@@ -214,21 +270,41 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if body.SendStillRunningEmail != nil {
 		sendMail = *body.SendStillRunningEmail
 	}
+	photoPath := u.ProfilePhotoPath
+	if len(body.Photo) > 0 {
+		if string(body.Photo) == "null" {
+			photoPath = nil
+		} else {
+			var dataURL string
+			if err := json.Unmarshal(body.Photo, &dataURL); err != nil {
+				validationErr(w, map[string][]string{"photo": {"The photo field is invalid."}})
+				return
+			}
+			p, err := s.saveProfilePhoto(u.ID, dataURL)
+			if err != nil {
+				validationErr(w, map[string][]string{"photo": {"The photo field is invalid."}})
+				return
+			}
+			photoPath = &p
+		}
+	}
 	if _, err := s.pool.Exec(r.Context(), `
 		UPDATE users SET name = $2, timezone = $3, week_start = $4,
-			send_time_entry_still_running_email = $5, pending_email = $6, updated_at = now()
+			send_time_entry_still_running_email = $5, pending_email = $6,
+			profile_photo_path = $7, updated_at = now()
 		WHERE id = $1`,
-		u.ID, name, timezone, weekStart, sendMail, pending); err != nil {
+		u.ID, name, timezone, weekStart, sendMail, pending, photoPath); err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
 	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = name, timezone, weekStart, pending
+	u.ProfilePhotoPath = photoPath
 	u.SendStillRunningEmail = sendMail
 	s.recordAudit(r, audit.EventUpdated, audit.TypeUser, uuidOrZero(u.ID), pgtype.UUID{}, uuidOrZero(u.ID), auditBefore, authUserAttrs(*u))
 	if emailChanged && pending != nil {
 		s.sendEmailChangeVerification(r, u.ID, *pending)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.userResource(u)})
 }
 
 // sendEmailChangeVerification mails the signed verify-email-change link to
