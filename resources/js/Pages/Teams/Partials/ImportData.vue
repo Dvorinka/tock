@@ -163,7 +163,7 @@ const showResultModal = ref(false);
                 <InformationCircleIcon class="h-5 min-w-0 w-5 text-bg-tertiary" />
                 <p class="flex-1">
                     Import existing data from Toggl, Clockify, Harvest, generic CSV files or a
-                    different solidtime instance. Please select the type of data you want to import
+                    different tock instance. Please select the type of data you want to import
                     and follow the instructions.
                 </p>
             </div>

@@ -34,7 +34,7 @@ function cancelTrial() {
                     {{ daysLeftLabel }} left in your trial
                 </div>
                 <DialogTitle class="mt-4 text-xl font-semibold tracking-tight text-text-primary">
-                    Keep solidtime Professional
+                    Keep tock Professional
                 </DialogTitle>
                 <DialogDescription class="mt-1.5 text-sm text-text-secondary">
                     Upgrade now to keep these features after your trial ends.

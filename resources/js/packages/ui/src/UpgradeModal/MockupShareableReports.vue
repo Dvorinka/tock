@@ -23,7 +23,7 @@ const previewRows = [
                 <div
                     class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md bg-gray-100 px-2 py-1 text-[11px] text-gray-500 dark:bg-black/30 dark:text-white/50">
                     <LockClosedIcon class="h-3 w-3 shrink-0 text-gray-400 dark:text-white/30" />
-                    <span class="truncate">app.solidtime.io/shared-report</span>
+                    <span class="truncate">tock.app/shared-report</span>
                 </div>
                 <span
                     class="flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-700 dark:border-transparent dark:bg-white/15 dark:text-white/90">
