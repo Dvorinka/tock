@@ -950,15 +950,78 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 // profilePlaceholder renders the Jetstream profile Inertia page.
 func (s *Server) handleProfileShow(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
-	confirmed := false
-	if sess != nil {
-		if ts, ok := sess.Get("auth.password_confirmed_at").(float64); ok {
-			confirmed = time.Since(time.Unix(int64(ts), 0)) < 3*time.Hour
-		}
-	}
 	s.spa.Render(w, r, "Profile/Show", map[string]any{
-		"confirmsTwoFactorAuthentication": !confirmed,
+		// Upstream: Features::optionEnabled('two-factor-authentication',
+		// 'confirmPassword') — a static feature flag, not session state.
+		"confirmsTwoFactorAuthentication": true,
+		"sessions":                        s.userSessions(r, sess),
 	})
+}
+
+// userSessions builds the Jetstream `sessions` prop — recent rows from the
+// shared sessions table parsed into {agent, ip_address, is_current_device,
+// last_active}.
+func (s *Server) userSessions(r *http.Request, sess *auth.Session) []map[string]any {
+	u := auth.UserFromContext(r.Context())
+	out := []map[string]any{}
+	if u == nil {
+		return out
+	}
+	currentID := ""
+	if sess != nil {
+		currentID = sess.ID
+	}
+	rows, err := s.pool.Query(r.Context(), `
+		SELECT id, coalesce(ip_address,''), coalesce(user_agent,''), last_activity
+		FROM sessions WHERE user_id = $1 ORDER BY last_activity DESC LIMIT 10`, u.ID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, ip, ua string
+		var last int64
+		if err := rows.Scan(&id, &ip, &ua, &last); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"agent":             sessionAgent(ua),
+			"ip_address":        ip,
+			"is_current_device": id == currentID,
+			"last_active":       time.Since(time.Unix(last, 0)).Round(time.Second).String(),
+		})
+	}
+	return out
+}
+
+func sessionAgent(ua string) map[string]any {
+	platform, browser := "Unknown", "Unknown"
+	desktop := true
+	switch {
+	case strings.Contains(ua, "Windows"):
+		platform = "Windows"
+	case strings.Contains(ua, "Mac OS"):
+		platform = "macOS"
+	case strings.Contains(ua, "Android"):
+		platform = "Android"
+		desktop = false
+	case strings.Contains(ua, "iPhone") || strings.Contains(ua, "iPad"):
+		platform = "iOS"
+		desktop = false
+	case strings.Contains(ua, "Linux"):
+		platform = "Linux"
+	}
+	switch {
+	case strings.Contains(ua, "Edg/"):
+		browser = "Edge"
+	case strings.Contains(ua, "Firefox/"):
+		browser = "Firefox"
+	case strings.Contains(ua, "Chrome/"):
+		browser = "Chrome"
+	case strings.Contains(ua, "Safari/"):
+		browser = "Safari"
+	}
+	return map[string]any{"platform": platform, "browser": browser, "is_desktop": desktop}
 }
 
 func newUUID() string {
