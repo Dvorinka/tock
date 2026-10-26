@@ -199,10 +199,13 @@ func (s *Server) requireVerified(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := auth.UserFromContext(r.Context())
 		if u != nil && u.EmailVerifiedAt == nil {
-			if r.Header.Get("X-Inertia") != "" {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
 				writeMessage(w, http.StatusConflict, "Your email address is not verified.")
 				return
 			}
+			// Inertia page requests (X-Inertia propagates through redirects)
+			// must get a real redirect like upstream's verified middleware —
+			// a 409 JSON lands on Inertia's "plain JSON" error modal.
 			http.Redirect(w, r, "/email/verify", http.StatusFound)
 			return
 		}
