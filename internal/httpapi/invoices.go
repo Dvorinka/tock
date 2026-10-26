@@ -427,7 +427,7 @@ func (s *Server) handleShowInvoiceRecipient(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(recipient)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": invoiceRecipientResource(recipient)})
 }
 
 // handleStoreInvoiceRecipient: POST .../invoice-recipients
@@ -446,7 +446,7 @@ func (s *Server) handleStoreInvoiceRecipient(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeInvoiceRecipient, recipient.ID, scope.org.ID, pgtype.UUID{}, nil, invoiceRecipientAttrs(recipient))
-	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(recipient)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": invoiceRecipientResource(recipient)})
 }
 
 // handleUpdateInvoiceRecipient: PUT .../invoice-recipients/{invoiceRecipient}
@@ -520,7 +520,7 @@ func (s *Server) handleDuplicateInvoiceRecipient(w http.ResponseWriter, r *http.
 		return
 	}
 	s.recordAudit(r, audit.EventCreated, audit.TypeInvoiceRecipient, recipient.ID, scope.org.ID, pgtype.UUID{}, nil, invoiceRecipientAttrs(recipient))
-	writeJSON(w, http.StatusOK, map[string]any{"data": invoiceRecipientResource(recipient)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": invoiceRecipientResource(recipient)})
 }
 
 // handleDestroyInvoiceRecipient: DELETE .../invoice-recipients/{invoiceRecipient}
