@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"sort"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -135,8 +136,22 @@ func writeDomainErr(w http.ResponseWriter, err error) {
 
 // validationErr renders Laravel's ValidationException shape.
 func validationErr(w http.ResponseWriter, errs map[string][]string) {
+	// Laravel ValidationException puts the first bag message in `message`
+	// (notification toasts read it directly); keys sorted for determinism.
+	msg := "The given data was invalid."
+	keys := make([]string, 0, len(errs))
+	for k := range errs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if len(errs[k]) > 0 {
+			msg = errs[k][0]
+			break
+		}
+	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"message": "The given data was invalid.", "errors": errs,
+		"message": msg, "errors": errs,
 	})
 }
 

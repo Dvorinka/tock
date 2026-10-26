@@ -191,9 +191,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(errs) > 0 {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"message": "The given data was invalid.", "errors": errs,
-		})
+		validationErr(w, errs)
 		return
 	}
 	// Email change goes through pending_email + verification (upstream behavior).
@@ -205,10 +203,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id <> $2)`,
 			body.Email, u.ID).Scan(&taken)
 		if taken {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-				"message": "The given data was invalid.",
-				"errors":  map[string][]string{"email": {"The email has already been taken."}},
-			})
+			validationErr(w, map[string][]string{"email": {"The email has already been taken."}})
 			return
 		}
 		lower := strings.ToLower(email)
@@ -311,7 +306,7 @@ func (s *Server) handleResetPendingEmail(w http.ResponseWriter, r *http.Request)
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": u.ID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 var _ = time.Now
