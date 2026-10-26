@@ -172,7 +172,10 @@ export async function getEmailChangeVerificationUrl(
     expect(searchResult.messages.length).toBeGreaterThan(0);
 
     const message = await getMessage(request, searchResult.messages[0].ID);
-    const verifyUrlMatch = message.HTML.match(/href="([^"]*verify-email-change[^"]*)"/);
+    // tock sends plain-text mail; search both bodies like the other helpers.
+    const body = `${message.HTML ?? ''}
+${message.Text ?? ''}`;
+    const verifyUrlMatch = body.match(/(https?:\/\/[^\s"'<>]*verify-email-change[^\s"'<>]*)/);
     expect(verifyUrlMatch).toBeTruthy();
 
     return verifyUrlMatch![1].replace(/&amp;/g, '&');

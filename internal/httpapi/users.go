@@ -1,8 +1,11 @@
 package httpapi
 
 import (
-	"crypto/md5"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
+	"net/url"
+	"strconv"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -16,9 +19,21 @@ import (
 	"github.com/Dvorinka/tock/internal/domain"
 )
 
-func gravatarURL(email string) string {
-	sum := md5.Sum([]byte(strings.ToLower(strings.TrimSpace(email))))
-	return "https://www.gravatar.com/avatar/" + hex.EncodeToString(sum[:]) + "?d=mp"
+// avatarURL returns the default avatar — upstream uses ui-avatars.com with
+// the user's initials (the SPA keys "has uploaded photo" on the absence of
+// the ui-avatars substring).
+func avatarURL(name string) string {
+	initials := ""
+	for _, part := range strings.Fields(strings.TrimSpace(name)) {
+		initials += strings.ToUpper(string([]rune(part)[0]))
+		if len(initials) >= 2 {
+			break
+		}
+	}
+	if initials == "" {
+		initials = "?"
+	}
+	return "https://ui-avatars.com/api/?name=" + url.QueryEscape(initials)
 }
 
 func userResource(u *auth.User) map[string]any {
@@ -27,7 +42,7 @@ func userResource(u *auth.User) map[string]any {
 		"name":                                u.Name,
 		"email":                               u.Email,
 		"pending_email":                       u.PendingEmail,
-		"profile_photo_url":                   gravatarURL(u.Email),
+		"profile_photo_url":                   avatarURL(u.Name),
 		"timezone":                            u.Timezone,
 		"week_start":                          u.WeekStart,
 		"send_time_entry_still_running_email": u.SendStillRunningEmail,
@@ -183,6 +198,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// Email change goes through pending_email + verification (upstream behavior).
 	pending := u.PendingEmail
+	emailChanged := false
 	if body.Email != nil && !strings.EqualFold(email, u.Email) {
 		var taken bool
 		_ = s.pool.QueryRow(r.Context(),
@@ -195,7 +211,9 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		pending = &email
+		lower := strings.ToLower(email)
+		pending = &lower
+		emailChanged = true
 	}
 	sendMail := u.SendStillRunningEmail
 	if body.SendStillRunningEmail != nil {
@@ -212,7 +230,24 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = name, timezone, weekStart, pending
 	u.SendStillRunningEmail = sendMail
 	s.recordAudit(r, audit.EventUpdated, audit.TypeUser, uuidOrZero(u.ID), pgtype.UUID{}, uuidOrZero(u.ID), auditBefore, authUserAttrs(*u))
+	if emailChanged && pending != nil {
+		s.sendEmailChangeVerification(r, u.ID, *pending)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": userResource(u)})
+}
+
+// sendEmailChangeVerification mails the signed verify-email-change link to
+// the new (pending) address — upstream "Verify Email Address" notification.
+func (s *Server) sendEmailChangeVerification(r *http.Request, userID, email string) {
+	expires := time.Now().Add(24 * time.Hour).Unix()
+	path := "/users/" + userID + "/verify-email-change"
+	qs := "email=" + url.QueryEscape(email) + "&expires=" + strconv.FormatInt(expires, 10)
+	mac := hmac.New(sha256.New, []byte(s.appKey))
+	mac.Write([]byte(path + "?" + qs))
+	link := s.appURL + path + "?" + qs + "&signature=" + hex.EncodeToString(mac.Sum(nil))
+	_ = s.sendMail(r.Context(), email, "Verify Email Address",
+		"Please click the button below to verify your new email address.\n\nVerify Email Address: "+link+
+			"\n\nIf you did not change your email address, no further action is required.")
 }
 
 func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +281,13 @@ func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleResendVerification(w http.ResponseWriter, r *http.Request) {
 	u := apiUser(w, r)
 	if u == nil {
+		return
+	}
+	// A pending email change resends the change-verification to the new
+	// address, not the registration verification to the current one.
+	if u.PendingEmail != nil {
+		s.sendEmailChangeVerification(r, u.ID, *u.PendingEmail)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err := s.sendVerificationEmail(r, u); err != nil {

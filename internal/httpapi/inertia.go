@@ -121,7 +121,7 @@ func (s *spaHandler) sharedProps(r *http.Request) map[string]any {
 			"name":                                user.Name,
 			"email":                               user.Email,
 			"pending_email":                       user.PendingEmail,
-			"profile_photo_url":                   gravatarURL(user.Email),
+			"profile_photo_url":                   avatarURL(user.Name),
 			"timezone":                            user.Timezone,
 			"week_start":                          user.WeekStart,
 			"current_organization_id":             user.CurrentOrganizationID,
