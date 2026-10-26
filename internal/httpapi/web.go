@@ -493,7 +493,7 @@ func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
 		u.Email, hex.EncodeToString(sum[:]))
 	link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
-	_ = s.sendMail(r.Context(), u.Email, "Reset Password Notification",
+	_ = s.sendMail(r.Context(), u.Email, "Reset your password",
 		"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
 	if sess != nil {
 		sess.Set("status", "We have emailed your password reset link.")
