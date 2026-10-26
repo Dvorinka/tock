@@ -26,3 +26,34 @@ Bugs found via the suite, all fixed:
 - spec-side: verify-flow helper, reset regex searches Text body, networkidle
   before post-logout fills (hydration race), duplicate-email text matched
   upstream's "has already been taken".
+
+## E2E suite state (issue #18, 2026-10-26)
+
+Full inventory went from ~143 failures to **~30** (most remaining are
+environmental or upstream-inconsistent, not parity bugs):
+
+- Fixed and verified green: auth 11/11, profile 36/36, two-factor 6/6,
+  shared-reports 24/24, dashboard 9/9, members 27/27, calendar ~94,
+  timesheet 10/10, tags/tasks/clients ~36, timetracker ~37, reporting ~56,
+  organization 37/37, import-export 48/48, goals 22/22, invitations 4/4,
+  admin-panel 14/15.
+- API-contract fixes this pass: bulk DELETE `ids`/`ids[]` query,
+  `to_jsonb` `::text` casts (42804), `type` default, `end:null` running
+  entries, goal-progress UTC, report `name` required, `billable`/`client`
+  null-vs-false, public-report unwrapped `data`, `201`s on create,
+  `currencies` `{code:name}` map, HTML invitation mail, `PUT
+  /current-team`, invited-register `email_verified_at`, reset-mail subject.
+- New surface: `/admin` super-admin panel (SUPER_ADMINS email gate;
+  Filament-parity server-rendered dashboard + 12 resource pages).
+
+Known residual (not parity bugs):
+- **Dispatch-stall (~9 tests)**: `Promise.all` mass-creates through the
+  fixture's `page.request` starve — server verified clean under 17x curl
+  concurrency (~90ms); the stall is inside Playwright's dispatch, not the
+  app. Affects clients/projects/detailed pagination, filter virtualization,
+  project-search.
+- **Calendar multi-day (4)**: `useEventResize` cross-day segments don't
+  fire the update PUT — a deeper UI interaction bug, not API.
+- **Admin forbidden (1)**: upstream's spec asserts `dashboard_view`
+  directly after a non-invited registration — inconsistent with the
+  verify-email flow both apps implement.
