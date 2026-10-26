@@ -248,7 +248,15 @@ func flashErrors(r *http.Request, errs map[string]string) {
 }
 
 func backWithErrors(w http.ResponseWriter, r *http.Request, errs map[string]string, referer string) {
-	flashErrors(r, errs)
+	// Jetstream forms post with an Inertia error bag — the client sends
+	// X-Inertia-Error-Bag and expects errors under errors[bag].
+	if bag := r.Header.Get("X-Inertia-Error-Bag"); bag != "" {
+		if sess := auth.SessionFromContext(r.Context()); sess != nil {
+			sess.Set("errors", map[string]any{bag: errs})
+		}
+	} else {
+		flashErrors(r, errs)
+	}
 	if referer == "" {
 		referer = r.Referer()
 	}

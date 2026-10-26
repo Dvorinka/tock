@@ -102,24 +102,27 @@ func (s *Session) GetString(key string) string {
 	return v
 }
 
-// Errors returns and clears the validation error bag (Laravel session flash "errors").
-func (s *Session) PullErrors() map[string]string {
+// Errors returns and clears the validation error bag (Laravel session flash
+// "errors"). Values may be flat field→message maps or nested Inertia error
+// bags (bag→field→message); both ride through as map[string]any.
+func (s *Session) PullErrors() map[string]any {
 	raw, ok := s.Data["errors"]
 	if !ok {
 		return nil
 	}
 	delete(s.Data, "errors")
 	s.Dirty = true
-	m := map[string]string{}
-	if mm, ok := raw.(map[string]string); ok {
-		return mm
+	if m, ok := raw.(map[string]any); ok {
+		return m
 	}
-	if mm, ok := raw.(map[string]any); ok {
-		for k, v := range mm {
-			m[k], _ = v.(string)
+	if m, ok := raw.(map[string]string); ok {
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[k] = v
 		}
+		return out
 	}
-	return m
+	return nil
 }
 
 // Flash returns and clears a one-shot value.
