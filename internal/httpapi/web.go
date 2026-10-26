@@ -494,8 +494,9 @@ func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (email) DO UPDATE SET token = $2, created_at = now()`,
 		u.Email, hex.EncodeToString(sum[:]))
 	link := s.appURL + "/reset-password/" + token + "?email=" + url.QueryEscape(u.Email)
-	_ = s.sendMail(r.Context(), u.Email, "Reset your password",
-		"You are receiving this email because we received a password reset request for your account.\n\nReset Password: "+link+"\n\nIf you did not request a password reset, no further action is required.")
+	_ = s.sendMailHTML(r.Context(), u.Email, "Reset your password",
+		"You are receiving this email because we received a password reset request for your account. If you did not request a password reset, no further action is required.",
+		"Reset Password", link)
 	if sess != nil {
 		sess.Set("status", "We have emailed your password reset link.")
 	}
@@ -574,9 +575,28 @@ func (s *Server) verifySignedURL(r *http.Request) bool {
 
 func (s *Server) sendVerificationEmail(r *http.Request, u *auth.User) error {
 	link := s.signVerifyURL(u.ID, u.Email, time.Now().Add(24*time.Hour))
-	return s.sendMail(r.Context(), u.Email, "Verify Email Address",
-		"Please click the button below to verify your email address.\n\nVerify Email Address: "+link+
-			"\n\nIf you did not create an account, no further action is required.")
+	return s.sendMailHTML(r.Context(), u.Email, "Verify Email Address",
+		"Please click the button below to verify your email address. If you did not create an account, no further action is required.",
+		"Verify Email Address", link)
+}
+
+// sendMailHTML sends a branded HTML notification (upstream mails are HTML).
+func (s *Server) sendMailHTML(ctx context.Context, to, subject, text, action, link string) error {
+	if s.smtpAddr == "" {
+		return nil // mail disabled
+	}
+	escaped := template.HTMLEscapeString(text)
+	html := `<!doctype html><html><body style="font-family:ui-sans-serif,system-ui,sans-serif;background:#f6f7f9;padding:32px">
+	  <div style="max-width:480px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:32px">
+	  <div style="font-size:20px;font-weight:700;letter-spacing:-0.02em;margin-bottom:24px">tock</div>
+	  <p style="font-size:14px;color:#374151;line-height:1.5;margin:0 0 24px">` + escaped + `</p>
+	  <a href="` + link + `" style="display:inline-block;background:#111827;color:#fff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;padding:10px 20px">` + action + `</a>
+	  <p style="font-size:12px;color:#9ca3af;margin:24px 0 0;word-break:break-all">` + link + `</p>
+	  </div></body></html>`
+	if s.pool != nil {
+		return jobs.EnqueueMailHTML(ctx, s.pool, to, subject, text, html)
+	}
+	return s.sendMail(ctx, to, subject, text)
 }
 
 func (s *Server) sendMail(ctx context.Context, to, subject, body string) error {

@@ -352,9 +352,9 @@ func (s *Server) sendEmailChangeVerification(r *http.Request, userID, email stri
 	mac := hmac.New(sha256.New, []byte(s.appKey))
 	mac.Write([]byte(path + "?" + qs))
 	link := s.appURL + path + "?" + qs + "&signature=" + hex.EncodeToString(mac.Sum(nil))
-	_ = s.sendMail(r.Context(), email, "Verify Email Address",
-		"Please click the button below to verify your new email address.\n\nVerify Email Address: "+link+
-			"\n\nIf you did not change your email address, no further action is required.")
+	_ = s.sendMailHTML(r.Context(), email, "Verify Email Address",
+		"Please click the button below to verify your new email address. If you did not change your email address, no further action is required.",
+		"Verify Email Address", link)
 }
 
 func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
