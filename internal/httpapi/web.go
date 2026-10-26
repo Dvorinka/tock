@@ -47,10 +47,11 @@ type Server struct {
 	mailFrom      string
 	secureCookies bool
 	registration  bool
+	superAdmins   []string
 }
 
-func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool) *Server {
-	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth,
+func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool, superAdmins []string) *Server {
+	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth, superAdmins: superAdmins,
 		domain:   domain.NewService(pool),
 		importer: importer.New(pool, storageDir),
 		appURL:   appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",

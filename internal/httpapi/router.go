@@ -49,7 +49,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration)
+	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration, cfg.SuperAdmins)
 
 	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
 	// Same-origin SPA calls authenticate with the session cookie instead of a
@@ -285,6 +285,12 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 		// Public shared report page (upstream web.php /shared-report).
 		r.Get("/shared-report", srv.handleSharedReportPage)
+
+		// Admin panel — super-admin email gate, server-rendered (Filament-parity).
+		r.Route("/admin", func(r chi.Router) {
+			r.Get("/", srv.handleAdminDashboard)
+			r.Get("/{resource}", srv.handleAdminResource)
+		})
 
 		// Signed export downloads — Laravel local-disk temporaryUrl port.
 		r.Get("/exports/{file}", srv.handleExportDownload)

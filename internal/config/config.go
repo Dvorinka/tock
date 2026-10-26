@@ -2,6 +2,7 @@
 package config
 
 import (
+	"strings"
 	"log/slog"
 	"os"
 )
@@ -21,6 +22,7 @@ type Config struct {
 	OAuthKeyDir        string // TOCK_OAUTH_KEY_DIR — RSA keypair storage
 	StorageDir         string // TOCK_STORAGE_DIR — private disk root (exports)
 	SecureCookies      bool   // TOCK_SECURE_COOKIES
+	SuperAdmins        []string // SUPER_ADMINS — emails allowed into the admin panel
 	Registration       bool   // TOCK_ENABLE_REGISTRATION
 	Logger                     *slog.Logger
 }
@@ -51,7 +53,8 @@ func Load() Config {
 			smtp = "127.0.0.1:1025"
 		}
 	}
-	cfg := Config{
+		cfg := Config{
+		SuperAdmins: strings.Split(env("SUPER_ADMINS", ""), ","),
 		Addr:                       addr,
 		DatabaseDSN:                dsn,
 		AppURL:                     env("TOCK_APP_URL", env("APP_URL", "http://localhost:8080")),
