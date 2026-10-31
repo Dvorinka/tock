@@ -62,6 +62,7 @@ export function createNavigationCommands(
         canViewTags: () => boolean;
         canViewReport: () => boolean;
         canViewInvoices: () => boolean;
+        canViewAudits: () => boolean;
         canViewGoals: () => boolean;
         canManageBilling: () => boolean;
         canUpdateOrganization: () => boolean;
@@ -190,6 +191,16 @@ export function createNavigationCommands(
             priority: GROUP_PRIORITIES.navigation,
         },
         {
+            id: 'nav-audit-log',
+            label: 'Go to Audit Log',
+            icon: ClipboardDocumentListIcon,
+            keywords: ['audit', 'activity', 'history', 'changes'],
+            group: 'navigation',
+            action: () => navigate('audit-log'),
+            permission: permissions.canViewAudits,
+            priority: GROUP_PRIORITIES.navigation - 1,
+        },
+        {
             id: 'nav-billing',
             label: 'Go to Billing',
             icon: CreditCardIcon,
@@ -198,7 +209,7 @@ export function createNavigationCommands(
             action: () => navigate('/billing', {}),
             permission: permissions.canManageBilling,
             condition: features.isBillingActivated,
-            priority: GROUP_PRIORITIES.navigation - 1,
+            priority: GROUP_PRIORITIES.navigation - 2,
         },
         {
             id: 'nav-import',
@@ -208,7 +219,7 @@ export function createNavigationCommands(
             group: 'navigation',
             action: () => navigate('import'),
             permission: permissions.canUpdateOrganization,
-            priority: GROUP_PRIORITIES.navigation - 2,
+            priority: GROUP_PRIORITIES.navigation - 3,
         },
         {
             id: 'nav-settings',
