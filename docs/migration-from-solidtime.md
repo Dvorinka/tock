@@ -9,7 +9,9 @@ Postgres database works unchanged.
 2. Dump the database: `pg_dump -Fc solidtime > backup.dump` (or run tock
    against the live database — it is additive only).
 3. Point tock at the same Postgres: `TOCK_DB_DSN=postgres://user:pass@host/solidtime?sslmode=disable`.
-4. Run `tock migrate`. Existing upstream dumps are detected (the `users` table
+4. `tock serve` applies pending migrations by default (`AUTO_DB_MIGRATE=true`).
+   You can also run `tock migrate` explicitly and set `AUTO_DB_MIGRATE=false`
+   when starting the server. Existing upstream dumps are detected (the `users` table
    exists and `goose_db_version` does not) and the baseline migration is marked
    applied; only the invoicing tables are created on top.
 5. Run `tock serve`. The SPA is embedded; no PHP, queue workers, or scheduler

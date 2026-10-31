@@ -47,13 +47,25 @@ environmental or upstream-inconsistent, not parity bugs):
   Filament-parity server-rendered dashboard + 12 resource pages).
 
 Known residual (not parity bugs):
-- **Dispatch-stall (~9 tests)**: `Promise.all` mass-creates through the
-  fixture's `page.request` starve — server verified clean under 17x curl
-  concurrency (~90ms); the stall is inside Playwright's dispatch, not the
-  app. Affects clients/projects/detailed pagination, filter virtualization,
-  project-search.
-- **Calendar multi-day (4)**: `useEventResize` cross-day segments don't
-  fire the update PUT — a deeper UI interaction bug, not API.
-- **Admin forbidden (1)**: upstream's spec asserts `dashboard_view`
-  directly after a non-invited registration — inconsistent with the
-  verify-email flow both apps implement.
+- **Dispatch-stall**: some older high-volume specs still create records via
+  concurrent `Promise.all` calls and need review. The timer dropdown's
+  30-project fixture was changed to seed sequentially and its formerly
+  timing-out test now passes.
+
+## Follow-up (2026-10-31)
+
+- A local run of the cross-day resize preview case passed when the browser
+  origin matched `TOCK_APP_URL`. The first attempt used `127.0.0.1` for the
+  browser and `localhost` in signed mail links, so the session cookie was not
+  sent; this was a test-environment mismatch.
+- A focused 171-test calendar, timer, import/export, palette, and invoice run
+  reached 164 passes, 6 skips, and one timer-state race. The exact failing
+  case passed after `fetchCurrentTimeEntry` was guarded against stale
+  responses clearing a newly started timer. The `/admin` suite separately
+  passed 15/15 with `SUPER_ADMINS` configured; registration tests now follow
+  the email-verification flow in both fixture paths.
+- The calendar date fixtures now use UTC to match Playwright's configured
+  timezone. Cross-day drag and resize cases passed in the focused run.
+- Registration defaults to 100 requests per IP per hour and can be tuned with
+  `TOCK_RATE_LIMIT_REGISTER_PER_HOUR` for local test volume. The complete
+  571-test Playwright inventory still needs a clean run.
