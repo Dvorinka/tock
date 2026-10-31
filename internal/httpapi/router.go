@@ -28,6 +28,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -51,13 +52,27 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	}
 	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration, cfg.SuperAdmins)
 
+	loginLimit := newIPRateLimiter(10, 15*time.Minute)
+	// Registration is a low-risk, public onboarding route. Keep a generous
+	// per-IP ceiling by default, and allow operators to tune it for their
+	// onboarding volume and local test suites.
+	registerRequestsPerHour := cfg.RegisterRequestsPerHour
+	if registerRequestsPerHour < 1 {
+		registerRequestsPerHour = 100
+	}
+	registerLimit := newIPRateLimiter(registerRequestsPerHour, time.Hour)
+	forgotLimit := newIPRateLimiter(5, time.Hour)
+	resetLimit := newIPRateLimiter(10, time.Hour)
+	twoFactorLimit := newIPRateLimiter(10, 15*time.Minute)
+	verificationLimit := newIPRateLimiter(5, time.Hour)
+
 	// API bearer guard — 'auth:api' + 'verified' like the upstream group.
 	// Same-origin SPA calls authenticate with the session cookie instead of a
 	// bearer token (upstream does this via Passport's CreateFreshApiToken);
 	// those mutations must carry the CSRF header.
 	apiAuth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			uid, err := oauth.AuthenticateAPI(r)
+			uid, tokenScopes, err := oauth.AuthenticateAPI(r)
 			if err != nil {
 				sess := auth.SessionFromContext(r.Context())
 				if sess == nil || sess.UserID == nil {
@@ -72,6 +87,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 					}
 				}
 				uid = *sess.UserID
+			} else if !oauth2.ScopeAllows(tokenScopes, apiScopeForMethod(r.Method)) {
+				writeMessage(w, http.StatusForbidden, "The token does not have the required scope.")
+				return
 			}
 			u, err := srv.loadUser(r.Context(), uid)
 			if err != nil {
@@ -99,8 +117,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Put("/users/me/current-organization", srv.handleUpdateCurrentOrganization)
 				r.Put("/users/{user}", srv.handleUpdateUser)
 				r.Delete("/users/{user}", srv.handleDestroyUser)
-				r.Post("/users/{user}/resend-email-verification", srv.handleResendVerification)
-				r.Post("/users/{user}/reset-pending-email", srv.handleResetPendingEmail)
+				r.With(verificationLimit.Middleware).Post("/users/{user}/resend-email-verification", srv.handleResendVerification)
+				r.With(verificationLimit.Middleware).Post("/users/{user}/reset-pending-email", srv.handleResetPendingEmail)
 				r.Get("/users/me/memberships", srv.handleMyMemberships)
 
 				r.Get("/users/me/api-tokens", srv.handleIndexAPITokens)
@@ -225,7 +243,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 	// OAuth2 (Passport parity). /token is stateless; the rest ride the web
 	// session like upstream's 'web' + 'auth' middleware group.
-	r.Post("/oauth/token", oauth.HandleToken)
+	r.With(newIPRateLimiter(30, time.Minute).Middleware).Post("/oauth/token", oauth.HandleToken)
 	r.Route("/oauth", func(r chi.Router) {
 		r.Use(sessions.Middleware(cfg.SecureCookies))
 		r.Use(srv.webUserMiddleware)
@@ -240,7 +258,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Get("/personal-access-tokens", oauth.ListPersonalAccessTokens)
 		r.Post("/personal-access-tokens", oauth.CreatePersonalAccessToken)
 		r.Get("/scopes", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, []any{})
+			writeJSON(w, http.StatusOK, oauth2.ScopeDescriptions())
 		})
 	})
 
@@ -261,18 +279,18 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(guestOnly)
 			r.Get("/login", srv.handleLoginForm)
-			r.Post("/login", srv.handleLogin)
+			r.With(loginLimit.Middleware).Post("/login", srv.handleLogin)
 			r.Get("/register", srv.handleRegisterForm)
-			r.Post("/register", srv.handleRegister)
+			r.With(registerLimit.Middleware).Post("/register", srv.handleRegister)
 			r.Get("/forgot-password", srv.handleForgotForm)
-			r.Post("/forgot-password", srv.handleForgot)
+			r.With(forgotLimit.Middleware).Post("/forgot-password", srv.handleForgot)
 			r.Get("/reset-password/{token}", srv.handleResetForm)
-			r.Post("/reset-password", srv.handleReset)
+			r.With(resetLimit.Middleware).Post("/reset-password", srv.handleReset)
 		})
 		r.Post("/logout", srv.handleLogout)
 		r.Put("/current-team", srv.handleSwitchTeam)
 		r.Get("/two-factor-challenge", srv.handleTwoFactorChallengeForm)
-		r.Post("/two-factor-challenge", srv.handleTwoFactorChallenge)
+		r.With(twoFactorLimit.Middleware).Post("/two-factor-challenge", srv.handleTwoFactorChallenge)
 
 		// Invitation accept links — public like upstream; 'signed' on the
 		// legacy route (absolute URL), 'signed:relative' on the current one.
@@ -302,7 +320,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Use(srv.requireAuth)
 			r.Get("/email/verify", srv.handleVerifyNotice)
 			r.Get("/email/verify/{id}/{hash}", srv.handleVerifyEmail)
-			r.Post("/email/verification-notification", srv.handleResendVerificationWeb)
+			r.With(verificationLimit.Middleware).Post("/email/verification-notification", srv.handleResendVerificationWeb)
 			r.Get("/user/confirm-password", srv.handleConfirmPasswordForm)
 			r.Post("/user/confirm-password", srv.handleConfirmPassword)
 			r.Get("/user/confirmed-password-status", srv.handlePasswordConfirmationStatus)
@@ -352,6 +370,21 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	return r
 }
 
+func apiScopeForMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "read"
+	case http.MethodPost:
+		return "create"
+	case http.MethodPut, http.MethodPatch:
+		return "update"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return ""
+	}
+}
+
 func apiNotFound(w http.ResponseWriter, _ *http.Request) {
 	writeMessage(w, http.StatusNotFound, "API resource not found")
 }
@@ -363,8 +396,15 @@ func mountStatic(r chi.Router) {
 		return
 	}
 	fileServer := http.FileServer(http.FS(sub))
+	assetServer, err := newStaticAssetServer(sub)
+	if err == nil {
+		r.Get("/build/assets/*", assetServer.ServeHTTP)
+	} else {
+		r.Get("/build/assets/*", func(w http.ResponseWriter, r *http.Request) { fileServer.ServeHTTP(w, r) })
+	}
+	r.Get("/build/*", func(w http.ResponseWriter, r *http.Request) { fileServer.ServeHTTP(w, r) })
 	for _, prefix := range []string{
-		"/build/", "/favicons/", "/images/", "/fonts/", "/desktop-version/",
+		"/favicons/", "/images/", "/fonts/", "/desktop-version/",
 	} {
 		p := prefix
 		r.Get(p+"*", func(w http.ResponseWriter, r *http.Request) {

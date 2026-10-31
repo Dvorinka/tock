@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -53,17 +56,25 @@ func (s *spaHandler) Render(w http.ResponseWriter, r *http.Request, component st
 	}
 
 	var out strings.Builder
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		http.Error(w, "render page", http.StatusInternalServerError)
+		return
+	}
+	nonce := base64.RawStdEncoding.EncodeToString(nonceBytes)
 	err = shellTemplate.Execute(&out, map[string]any{
 		"Title":  "tock",
 		"Ziggy":  ziggyJS(origin),
 		"Script": s.entryFile,
 		"Styles": s.entryCSS,
 		"Page":   string(pageJSON),
+		"Nonce":  nonce,
 	})
 	if err != nil {
 		http.Error(w, "render shell", http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'", nonce))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(out.String()))
 }
