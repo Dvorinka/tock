@@ -112,7 +112,10 @@ export const test = baseTest.extend<
             await page.getByLabel('Confirm Password').fill(password);
             await page.getByLabel('I agree to the Terms of').click();
             await page.getByRole('button', { name: 'Register' }).click();
-            await page.waitForURL(`${PLAYWRIGHT_BASE_URL}/dashboard`);
+            await page.waitForURL(`${PLAYWRIGHT_BASE_URL}/email/verify`);
+            await verifyRegisteredEmail(page, email);
+            await page.goto(`${PLAYWRIGHT_BASE_URL}/dashboard`);
+            await page.waitForLoadState('domcontentloaded');
         } else {
             // Registration succeeded - cookies are already set in the context from the request.
             // Registered users start unverified, so follow the mailed verification link
