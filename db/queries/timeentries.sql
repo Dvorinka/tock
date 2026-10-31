@@ -325,29 +325,39 @@ GROUP BY DATE(start + make_interval(secs => $2::int))
 ORDER BY date;
 
 -- name: TimeEntriesSumBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)))), 0)::bigint
+-- Durations clip at the period bounds so entries spanning the boundary are
+-- counted by overlap (matches the Last-7-Days window query, issue #208).
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND type = 'work'
-  AND start BETWEEN $3 AND $4;
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3;
 
 -- name: TimeEntriesBillableSumBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)))), 0)::bigint
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND billable = true
-  AND start BETWEEN $3 AND $4;
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3;
 
 -- name: TimeEntriesBillableAmountBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)) * (billable_rate::float/60/60))), 0)::bigint
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+      ) * (billable_rate::float/60/60)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND billable = true AND billable_rate IS NOT NULL
-  AND start BETWEEN $3 AND $4;
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3;
 
 -- name: WeeklyProjectOverview :many
 SELECT project_id,
-       round(sum(extract(epoch from (coalesce("end", now()) - start))))::bigint AS aggregate
+       round(sum(extract(epoch from (
+         LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+       ))))::bigint AS aggregate
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND type = 'work'
-  AND start BETWEEN $3 AND $4
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3
 GROUP BY project_id;
 
 -- name: ProjectNamesForChart :many

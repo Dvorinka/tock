@@ -47,10 +47,27 @@ async function openContextMenu(page: Page, description: string) {
     await expect(page.getByRole('menu')).toBeVisible();
 }
 
-function todayAt(hour: number, minute: number = 0): string {
+function todayDate(dayOffset = 0, hour = 0, minute = 0): Date {
     const now = new Date();
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
-    return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+    return new Date(
+        Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate() + dayOffset,
+            hour,
+            minute
+        )
+    );
+}
+
+function dayString(dayOffset = 0): string {
+    return todayDate(dayOffset).toISOString().split('T')[0]!;
+}
+
+function todayAt(hour: number, minute: number = 0): string {
+    return todayDate(0, hour, minute)
+        .toISOString()
+        .replace(/\.\d{3}Z$/, 'Z');
 }
 
 /**
@@ -963,7 +980,7 @@ test.describe('Drag-to-Move Events', () => {
         ctx,
     }) => {
         const now = new Date();
-        const dayOfWeek = now.getDay();
+        const dayOfWeek = now.getUTCDay();
         // Need today to have a previous day visible in the week view (skip Sunday with Monday week start)
         test.skip(dayOfWeek === 1, 'Skipping on Monday — previous day not visible in week view');
 
@@ -978,9 +995,7 @@ test.describe('Drag-to-Move Events', () => {
         await goToCalendar(page);
         await scrollCalendarToTime(page, '00:00:00');
 
-        const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            .toISOString()
-            .split('T')[0];
+        const todayStr = todayDate().toISOString().split('T')[0];
         const todayCol = page.locator(`.fc-timegrid-col[data-date="${todayStr}"]`);
         const event = todayCol
             .locator('.fc-event')
@@ -1018,9 +1033,7 @@ test.describe('Drag-to-Move Events', () => {
         expect(newDurationMs).toBe(3600000);
 
         // The event should have moved to the previous day
-        const yesterdayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
-            .toISOString()
-            .split('T')[0];
+        const yesterdayStr = todayDate(-1).toISOString().split('T')[0];
         expect(newStart.toISOString().split('T')[0]).toBe(yesterdayStr);
     });
 });
@@ -1502,10 +1515,11 @@ test.describe('Resize Events', () => {
         await expect(event).toBeVisible();
 
         const slotHeight = await getSlotHeight(page);
-        const eventBox = await event.boundingBox();
-        const bottomY = eventBox!.y + eventBox!.height;
-        const centerX = eventBox!.x + eventBox!.width / 2;
-
+        const endResizer = event.locator('.fc-event-resizer-end');
+        await endResizer.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+        const resizerBox = await endResizer.boundingBox();
+        const centerX = resizerBox!.x + resizerBox!.width / 2;
+        const resizerY = resizerBox!.y + resizerBox!.height / 2;
         // Resize bottom edge down by 2 slots
         const [putResponse] = await Promise.all([
             page.waitForResponse(
@@ -1515,10 +1529,10 @@ test.describe('Resize Events', () => {
                     r.status() === 200
             ),
             (async () => {
-                await page.mouse.move(centerX, bottomY - 3);
+                await page.mouse.move(centerX, resizerY);
                 await page.waitForTimeout(100);
                 await page.mouse.down();
-                await page.mouse.move(centerX, bottomY + slotHeight * 2, { steps: 15 });
+                await page.mouse.move(centerX, resizerY + slotHeight * 2, { steps: 15 });
                 await page.mouse.up();
             })(),
         ]);
@@ -1733,7 +1747,7 @@ test.describe('Click-Drag Selection to Create', () => {
         page,
     }) => {
         const now = new Date();
-        const dayOfWeek = now.getDay();
+        const dayOfWeek = now.getUTCDay();
         // Need today and tomorrow both visible (skip Saturday with Monday week start)
         test.skip(dayOfWeek === 6, 'Skipping on Saturday — tomorrow not visible in week view');
 
@@ -1743,12 +1757,8 @@ test.describe('Click-Drag Selection to Create', () => {
         await scrollCalendarToTime(page, '10:00:00');
 
         // Find today's and tomorrow's columns
-        const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            .toISOString()
-            .split('T')[0];
-        const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-            .toISOString()
-            .split('T')[0];
+        const todayStr = todayDate().toISOString().split('T')[0];
+        const tomorrowStr = todayDate(1).toISOString().split('T')[0];
 
         const todayCol = page.locator(`.fc-timegrid-col[data-date="${todayStr}"]`);
         const tomorrowCol = page.locator(`.fc-timegrid-col[data-date="${tomorrowStr}"]`);
@@ -1878,12 +1888,12 @@ test.describe('Multi-Day Events', () => {
     test('event spanning 2 days renders and is visible', async ({ page, ctx }) => {
         // Create entry that spans from today 22:00 to tomorrow 02:00
         const now = new Date();
-        const dayOfWeek = now.getDay();
+        const dayOfWeek = now.getUTCDay();
         // If today is Saturday (6), the entry would span to next week and may not be visible
         test.skip(dayOfWeek === 6, 'Skipping on Saturday — multi-day would span to next week');
 
-        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0, 0);
-        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 2, 0, 0);
+        const startDate = todayDate(0, 22);
+        const endDate = todayDate(1, 2);
 
         const start = startDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const end = endDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1902,10 +1912,10 @@ test.describe('Multi-Day Events', () => {
 
     test('multi-day event can be edited via click', async ({ page, ctx }) => {
         const now = new Date();
-        test.skip(now.getDay() === 6, 'Skip on Saturday');
+        test.skip(now.getUTCDay() === 6, 'Skip on Saturday');
 
-        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0, 0);
-        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 2, 0, 0);
+        const startDate = todayDate(0, 22);
+        const endDate = todayDate(1, 2);
 
         const start = startDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const end = endDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1928,10 +1938,10 @@ test.describe('Multi-Day Events', () => {
 
     test('multi-day event context menu works', async ({ page, ctx }) => {
         const now = new Date();
-        test.skip(now.getDay() === 6, 'Skip on Saturday');
+        test.skip(now.getUTCDay() === 6, 'Skip on Saturday');
 
-        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0, 0);
-        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 2, 0, 0);
+        const startDate = todayDate(0, 22);
+        const endDate = todayDate(1, 2);
 
         const start = startDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const end = endDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1955,13 +1965,13 @@ test.describe('Multi-Day Events', () => {
         ctx,
     }) => {
         const now = new Date();
-        const dayOfWeek = now.getDay();
+        const dayOfWeek = now.getUTCDay();
         // Need today and tomorrow both visible (skip Saturday)
         test.skip(dayOfWeek === 6, 'Skipping on Saturday — multi-day would span to next week');
 
         // Create entry: today 22:00 → tomorrow 02:00 (4 hours, spanning 2 days)
-        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0, 0);
-        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 2, 0, 0);
+        const startDate = todayDate(0, 22);
+        const endDate = todayDate(1, 2);
         const start = startDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const end = endDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -1974,9 +1984,7 @@ test.describe('Multi-Day Events', () => {
         await scrollCalendarToTime(page, '00:00:00');
 
         // Find the clipped segment on tomorrow's column (00:00-02:00)
-        const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-            .toISOString()
-            .split('T')[0];
+        const tomorrowStr = todayDate(1).toISOString().split('T')[0];
         const tomorrowCol = page.locator(`.fc-timegrid-col[data-date="${tomorrowStr}"]`);
         const event = tomorrowCol.locator('.fc-event').filter({ hasText: 'Multi day drag test' });
         await expect(event).toBeVisible({ timeout: 10000 });
@@ -2014,9 +2022,7 @@ test.describe('Multi-Day Events', () => {
         expect(Math.abs(newDurationMs - origDurationMs)).toBeLessThan(60000);
 
         // The start should still be on today (not jumped to tomorrow)
-        const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            .toISOString()
-            .split('T')[0];
+        const todayStr = todayDate().toISOString().split('T')[0];
         expect(newStart.toISOString().split('T')[0]).toBe(todayStr);
     });
 
@@ -2025,13 +2031,13 @@ test.describe('Multi-Day Events', () => {
         ctx,
     }) => {
         const now = new Date();
-        const dayOfWeek = now.getDay();
+        const dayOfWeek = now.getUTCDay();
         // Need today and tomorrow both visible (skip Saturday)
         test.skip(dayOfWeek === 6, 'Skipping on Saturday — multi-day would span to next week');
 
         // Create entry: today 22:00 → tomorrow 02:00 (4 hours, spanning 2 days)
-        const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0, 0);
-        const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 2, 0, 0);
+        const startDate = todayDate(0, 22);
+        const endDate = todayDate(1, 2);
         const start = startDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const end = endDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -2044,9 +2050,7 @@ test.describe('Multi-Day Events', () => {
         await scrollCalendarToTime(page, '00:00:00');
 
         // Find the clipped segment on tomorrow's column (00:00-02:00)
-        const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-            .toISOString()
-            .split('T')[0];
+        const tomorrowStr = todayDate(1).toISOString().split('T')[0];
         const tomorrowCol = page.locator(`.fc-timegrid-col[data-date="${tomorrowStr}"]`);
         const event = tomorrowCol
             .locator('.fc-event')
@@ -2204,8 +2208,7 @@ test.describe('Activity Plugin Overlays', () => {
         // Wait for FullCalendar to fully render its time grid
         await page.waitForTimeout(1000);
 
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const todayStr = dayString();
 
         // Inject activity data via the exposed setter function
         await page.evaluate((dateStr: string) => {
@@ -2238,8 +2241,7 @@ test.describe('Activity Plugin Overlays', () => {
         await goToCalendar(page);
         await page.waitForTimeout(1000);
 
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const todayStr = dayString();
 
         await page.evaluate((dateStr: string) => {
             const setter = (window as any).__TEST_SET_ACTIVITY_PERIODS__;

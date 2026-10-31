@@ -564,8 +564,8 @@ func (s *Server) signVerifyURL(userID string, email string, expires time.Time) s
 func (s *Server) verifySignedURL(r *http.Request) bool {
 	userID := chi.URLParam(r, "id")
 	hash := chi.URLParam(r, "hash")
-	expires, _ := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
-	if expires < time.Now().Unix() {
+	expires, err := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
+	if err != nil || expires <= time.Now().Unix() {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte("tock-verify"))

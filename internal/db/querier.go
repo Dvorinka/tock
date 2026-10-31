@@ -215,6 +215,8 @@ type Querier interface {
 	TimeEntriesExistForMemberUser(ctx context.Context, arg TimeEntriesExistForMemberUserParams) (bool, error)
 	// getDailyTrackedHours / getWeeklyHistory: per-date sums in user tz
 	TimeEntriesForChartAggregate(ctx context.Context, arg TimeEntriesForChartAggregateParams) ([]TimeEntriesForChartAggregateRow, error)
+	// Durations clip at the period bounds so entries spanning the boundary are
+	// counted by overlap (matches the Last-7-Days window query, issue #208).
 	TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error)
 	TimeEntryExistsWithTag(ctx context.Context, arg TimeEntryExistsWithTagParams) (bool, error)
 	TryImportLock(ctx context.Context, hashtext string) (bool, error)

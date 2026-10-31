@@ -33,6 +33,10 @@ docker run -e TOCK_DB_DSN=postgres://user:pass@host/db -p 8080:8080 ghcr.io/dvor
 Migrating from an existing solidtime install: see
 [docs/migration-from-solidtime.md](docs/migration-from-solidtime.md).
 
+Registration is limited to 100 requests per IP per hour by default. Set
+`TOCK_RATE_LIMIT_REGISTER_PER_HOUR` to tune that limit for your deployment or
+local test suite.
+
 ## Development
 
 ```sh

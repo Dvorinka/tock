@@ -551,7 +551,7 @@ const firstError = computed(() => {
             </div>
         </MainContainer>
 
-        <div class="flow-root">
+        <div v-if="invoices.length > 0" class="flow-root">
             <div class="inline-block min-w-full align-middle">
                 <div
                     data-testid="invoices_table"
@@ -632,19 +632,24 @@ const firstError = computed(() => {
                             </div>
                         </TableRow>
                     </template>
-
-                    <div
-                        v-if="!isLoading && invoices.length === 0"
-                        class="col-span-6 py-24 text-center">
-                        <BanknotesIcon class="w-8 text-icon-default inline pb-2"></BanknotesIcon>
-                        <h3 class="text-text-primary font-semibold">No invoices yet</h3>
-                        <p class="text-text-secondary">
-                            Create your first invoice to bill tracked time.
-                        </p>
-                    </div>
                 </div>
             </div>
         </div>
+
+        <MainContainer
+            v-else-if="isLoading"
+            role="status"
+            aria-live="polite"
+            class="py-24 text-center text-text-secondary">
+            Loading invoices…
+        </MainContainer>
+        <MainContainer v-else data-testid="invoice_empty_state" class="py-24 text-center">
+            <BanknotesIcon
+                class="w-8 text-icon-default inline pb-2"
+                aria-hidden="true"></BanknotesIcon>
+            <h3 class="text-text-primary font-semibold">No invoices yet</h3>
+            <p class="text-text-secondary">Create your first invoice to bill tracked time.</p>
+        </MainContainer>
 
         <MainContainer v-if="total > 15" class="py-4 flex justify-center">
             <Pagination v-model:page="page" :total="total"></Pagination>

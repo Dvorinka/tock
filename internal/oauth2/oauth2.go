@@ -35,6 +35,31 @@ const (
 	authCodeTTL     = 10 * time.Minute
 )
 
+// ScopeDescriptions mirrors the scopes exposed by the upstream Passport
+// authorization server.
+type ScopeDescription struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+func ScopeDescriptions() []ScopeDescription {
+	return []ScopeDescription{
+		{ID: "create", Description: "Create resources"},
+		{ID: "read", Description: "Read Resources"},
+		{ID: "update", Description: "Update Resources"},
+		{ID: "delete", Description: "Delete Resources"},
+	}
+}
+
+func isKnownScope(id string) bool {
+	for _, scope := range ScopeDescriptions() {
+		if scope.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 type Server struct {
 	pool *pgxpool.Pool
 	priv *rsa.PrivateKey
@@ -120,9 +145,9 @@ func (s *Server) issueToken(ctx context.Context, userID, clientID string, name *
 	return signed, refreshID, nil
 }
 
-// IssuePersonalAccessToken ports Passport's createToken for the personal
-// access client: scopes are ['*'], the token has no expiry and there is no
-// refresh token. Returns the token ID and the bearer string.
+// IssuePersonalAccessToken ports the upstream API-token endpoint: it grants
+// all API scopes, expires after one year, and has no refresh token. Returns
+// the token ID and the bearer string.
 func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name string) (string, string, error) {
 	var clientID string
 	if err := s.pool.QueryRow(ctx,
@@ -137,10 +162,10 @@ func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name stri
 		"jti":    jti,
 		"iat":    now.Unix(),
 		"nbf":    now.Unix(),
+		"exp":    now.Add(accessTokenTTL).Unix(),
 		"sub":    userID,
 		"scopes": []string{"*"},
 	}
-	// No exp claim: personal access tokens do not expire, matching Passport.
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = s.kid
 	signed, err := tok.SignedString(s.priv)
@@ -150,18 +175,18 @@ func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name stri
 	scopesJSON, _ := json.Marshal([]string{"*"})
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_access_tokens (id, user_id, client_id, name, scopes, revoked, created_at, updated_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, false, now(), now(), NULL)`,
-		jti, userID, clientID, name, string(scopesJSON)); err != nil {
+		VALUES ($1, $2, $3, $4, $5, false, now(), now(), $6)`,
+		jti, userID, clientID, name, string(scopesJSON), now.Add(accessTokenTTL)); err != nil {
 		return "", "", fmt.Errorf("insert access token: %w", err)
 	}
 	return jti, signed, nil
 }
 
 // AuthenticateAPI validates a Bearer JWT and returns the owning user ID.
-func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
+func (s *Server) AuthenticateAPI(r *http.Request) (string, []string, error) {
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") {
-		return "", errors.New("no bearer token")
+		return "", nil, errors.New("no bearer token")
 	}
 	token, err := jwt.Parse(strings.TrimPrefix(h, "Bearer "), func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
@@ -170,27 +195,52 @@ func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
 		return s.pub, nil
 	})
 	if err != nil || !token.Valid {
-		return "", errors.New("invalid token")
+		return "", nil, errors.New("invalid token")
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", errors.New("invalid claims")
+		return "", nil, errors.New("invalid claims")
 	}
 	jti, _ := claims["jti"].(string)
 	sub, _ := claims["sub"].(string)
+	scopes := claimScopes(claims["scopes"])
 	var revoked bool
 	var expiresAt pgtype.Timestamp
 	err = s.pool.QueryRow(r.Context(),
 		`SELECT revoked, expires_at FROM oauth_access_tokens WHERE id = $1`, jti).Scan(&revoked, &expiresAt)
 	if err != nil || revoked {
-		return "", errors.New("token revoked or expired")
+		return "", nil, errors.New("token revoked or expired")
 	}
-	// Personal access tokens carry no expiry (Passport only sets one for
-	// OAuth-issued tokens), so a NULL expires_at never expires.
+	// Older personal access tokens can have a NULL expires_at; preserve those
+	// legacy tokens while enforcing expiry for newly issued tokens.
 	if expiresAt.Valid && time.Now().After(expiresAt.Time) {
-		return "", errors.New("token revoked or expired")
+		return "", nil, errors.New("token revoked or expired")
 	}
-	return sub, nil
+	return sub, scopes, nil
+}
+
+func claimScopes(claim any) []string {
+	values, ok := claim.([]any)
+	if !ok {
+		return nil
+	}
+	scopes := make([]string, 0, len(values))
+	for _, value := range values {
+		if scope, ok := value.(string); ok {
+			scopes = append(scopes, scope)
+		}
+	}
+	return scopes
+}
+
+// ScopeAllows reports whether a bearer token carries the required API scope.
+func ScopeAllows(scopes []string, required string) bool {
+	for _, scope := range scopes {
+		if scope == "*" || scope == required {
+			return true
+		}
+	}
+	return false
 }
 
 func writeOAuthError(w http.ResponseWriter, status int, errName, hint string) {
@@ -416,7 +466,7 @@ func (s *Server) DenyPost(w http.ResponseWriter, r *http.Request) {
 
 type authReqData struct {
 	clientID, redirectURI, state, challenge string
-	scopes                                []string
+	scopes                                  []string
 }
 
 func decodeAuthRequest(m map[string]any) (authReqData, error) {
@@ -563,6 +613,15 @@ func (s *Server) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reques
 		Scopes []string `json:"scopes"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if len(body.Scopes) == 0 {
+		body.Scopes = []string{"*"}
+	}
+	for _, scope := range body.Scopes {
+		if scope != "*" && !isKnownScope(scope) {
+			writeOAuthError(w, http.StatusUnprocessableEntity, "invalid_scope", "scope is not supported")
+			return
+		}
+	}
 	access, _, err := s.issueToken(r.Context(), user.ID, clientID, &body.Name, body.Scopes)
 	if err != nil {
 		writeOAuthError(w, 500, "server_error", err.Error())

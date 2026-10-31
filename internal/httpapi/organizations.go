@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"sort"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,8 +21,8 @@ import (
 	"github.com/Dvorinka/tock/internal/auth"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/domain"
-	"github.com/Dvorinka/tock/internal/jobs"
 	"github.com/Dvorinka/tock/internal/importer"
+	"github.com/Dvorinka/tock/internal/jobs"
 )
 
 // ---- shared helpers ----
@@ -954,8 +954,8 @@ func (s *Server) signInvitationURL(invitationID string) string {
 // verifySignedURL ports Illuminate ValidateSignature. relative=false matches
 // middleware 'signed' (absolute URL signed); relative=true 'signed:relative'.
 func (s *Server) verifyURLSignature(r *http.Request, relative bool) bool {
-	expires, _ := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
-	if expires > 0 && time.Now().Unix() > expires {
+	expires, err := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
+	if err != nil || expires <= time.Now().Unix() {
 		return false
 	}
 	sig := r.URL.Query().Get("signature")

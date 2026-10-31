@@ -40,3 +40,32 @@ func TestTockEnvWinsOverUpstream(t *testing.T) {
 		t.Fatalf("addr: %s", cfg.Addr)
 	}
 }
+
+func TestAutoDBMigrateDefaultsOnAndCanBeDisabled(t *testing.T) {
+	t.Setenv("AUTO_DB_MIGRATE", "true")
+	if !Load().AutoDBMigrate {
+		t.Fatal("AUTO_DB_MIGRATE=true should enable startup migrations")
+	}
+
+	t.Setenv("AUTO_DB_MIGRATE", "false")
+	if Load().AutoDBMigrate {
+		t.Fatal("AUTO_DB_MIGRATE=false should disable startup migrations")
+	}
+}
+
+func TestRegisterRateLimitDefaultsAndCanBeConfigured(t *testing.T) {
+	t.Setenv("TOCK_RATE_LIMIT_REGISTER_PER_HOUR", "")
+	if got := Load().RegisterRequestsPerHour; got != 100 {
+		t.Fatalf("default register limit = %d, want 100", got)
+	}
+
+	t.Setenv("TOCK_RATE_LIMIT_REGISTER_PER_HOUR", "1000")
+	if got := Load().RegisterRequestsPerHour; got != 1000 {
+		t.Fatalf("configured register limit = %d, want 1000", got)
+	}
+
+	t.Setenv("TOCK_RATE_LIMIT_REGISTER_PER_HOUR", "0")
+	if got := Load().RegisterRequestsPerHour; got != 100 {
+		t.Fatalf("invalid register limit = %d, want default 100", got)
+	}
+}
