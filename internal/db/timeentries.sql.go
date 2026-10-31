@@ -1426,25 +1426,27 @@ func (q *Queries) TaskHasTimeEntries(ctx context.Context, taskID pgtype.UUID) (b
 }
 
 const timeEntriesBillableAmountBetween = `-- name: TimeEntriesBillableAmountBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)) * (billable_rate::float/60/60))), 0)::bigint
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+      ) * (billable_rate::float/60/60)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND billable = true AND billable_rate IS NOT NULL
-  AND start BETWEEN $3 AND $4
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3
 `
 
 type TimeEntriesBillableAmountBetweenParams struct {
 	UserID         pgtype.UUID
 	OrganizationID pgtype.UUID
-	Start          pgtype.Timestamp
-	Start_2        pgtype.Timestamp
+	Column3        pgtype.Timestamp
+	Column4        pgtype.Timestamp
 }
 
 func (q *Queries) TimeEntriesBillableAmountBetween(ctx context.Context, arg TimeEntriesBillableAmountBetweenParams) (int64, error) {
 	row := q.db.QueryRow(ctx, timeEntriesBillableAmountBetween,
 		arg.UserID,
 		arg.OrganizationID,
-		arg.Start,
-		arg.Start_2,
+		arg.Column3,
+		arg.Column4,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -1452,25 +1454,27 @@ func (q *Queries) TimeEntriesBillableAmountBetween(ctx context.Context, arg Time
 }
 
 const timeEntriesBillableSumBetween = `-- name: TimeEntriesBillableSumBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)))), 0)::bigint
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND billable = true
-  AND start BETWEEN $3 AND $4
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3
 `
 
 type TimeEntriesBillableSumBetweenParams struct {
 	UserID         pgtype.UUID
 	OrganizationID pgtype.UUID
-	Start          pgtype.Timestamp
-	Start_2        pgtype.Timestamp
+	Column3        pgtype.Timestamp
+	Column4        pgtype.Timestamp
 }
 
 func (q *Queries) TimeEntriesBillableSumBetween(ctx context.Context, arg TimeEntriesBillableSumBetweenParams) (int64, error) {
 	row := q.db.QueryRow(ctx, timeEntriesBillableSumBetween,
 		arg.UserID,
 		arg.OrganizationID,
-		arg.Start,
-		arg.Start_2,
+		arg.Column3,
+		arg.Column4,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -1528,25 +1532,29 @@ func (q *Queries) TimeEntriesForChartAggregate(ctx context.Context, arg TimeEntr
 }
 
 const timeEntriesSumBetween = `-- name: TimeEntriesSumBetween :one
-SELECT coalesce(round(sum(extract(epoch from (coalesce("end", now()) - start)))), 0)::bigint
+SELECT coalesce(round(sum(extract(epoch from (
+  LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+)))), 0)::bigint
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND type = 'work'
-  AND start BETWEEN $3 AND $4
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3
 `
 
 type TimeEntriesSumBetweenParams struct {
 	UserID         pgtype.UUID
 	OrganizationID pgtype.UUID
-	Start          pgtype.Timestamp
-	Start_2        pgtype.Timestamp
+	Column3        pgtype.Timestamp
+	Column4        pgtype.Timestamp
 }
 
+// Durations clip at the period bounds so entries spanning the boundary are
+// counted by overlap (matches the Last-7-Days window query, issue #208).
 func (q *Queries) TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error) {
 	row := q.db.QueryRow(ctx, timeEntriesSumBetween,
 		arg.UserID,
 		arg.OrganizationID,
-		arg.Start,
-		arg.Start_2,
+		arg.Column3,
+		arg.Column4,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -1808,18 +1816,20 @@ func (q *Queries) UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams
 
 const weeklyProjectOverview = `-- name: WeeklyProjectOverview :many
 SELECT project_id,
-       round(sum(extract(epoch from (coalesce("end", now()) - start))))::bigint AS aggregate
+       round(sum(extract(epoch from (
+         LEAST(coalesce("end", now()::timestamp), $4::timestamp + interval '1 second') - GREATEST(start::timestamp, $3::timestamp)
+       ))))::bigint AS aggregate
 FROM time_entries
 WHERE user_id = $1 AND organization_id = $2 AND type = 'work'
-  AND start BETWEEN $3 AND $4
+  AND start <= $4 AND coalesce("end", now()::timestamp) > $3
 GROUP BY project_id
 `
 
 type WeeklyProjectOverviewParams struct {
 	UserID         pgtype.UUID
 	OrganizationID pgtype.UUID
-	Start          pgtype.Timestamp
-	Start_2        pgtype.Timestamp
+	Column3        pgtype.Timestamp
+	Column4        pgtype.Timestamp
 }
 
 type WeeklyProjectOverviewRow struct {
@@ -1831,8 +1841,8 @@ func (q *Queries) WeeklyProjectOverview(ctx context.Context, arg WeeklyProjectOv
 	rows, err := q.db.Query(ctx, weeklyProjectOverview,
 		arg.UserID,
 		arg.OrganizationID,
-		arg.Start,
-		arg.Start_2,
+		arg.Column3,
+		arg.Column4,
 	)
 	if err != nil {
 		return nil, err

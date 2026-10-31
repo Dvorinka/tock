@@ -47,7 +47,7 @@ func dateBounds(first, last string, loc *time.Location) (time.Time, time.Time) {
 	if b.Before(a) {
 		a, b = b, a
 	}
-	return a.UTC(), b.Add(24*time.Hour).Add(-time.Second).UTC()
+	return a.UTC(), b.Add(24 * time.Hour).Add(-time.Second).UTC()
 }
 
 // currentWeekBounds ports constrainDateByCurrentWeek: startOfWeek UTC →
@@ -71,7 +71,7 @@ func (s *Server) handleWeeklyProjectOverview(w http.ResponseWriter, r *http.Requ
 	q := db.New(s.pool)
 	rows, err := q.WeeklyProjectOverview(r.Context(), db.WeeklyProjectOverviewParams{
 		UserID: uid, OrganizationID: scope.org.ID,
-		Start: ptts(start), Start_2: ptts(end),
+		Column4: ptts(end), Column3: ptts(start),
 	})
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
@@ -303,7 +303,7 @@ func (s *Server) handleTotalWeeklyTime(w http.ResponseWriter, r *http.Request) {
 	first, last := currentWeekBounds(loc, u.WeekStart)
 	total, err := db.New(s.pool).TimeEntriesSumBetween(r.Context(), db.TimeEntriesSumBetweenParams{
 		UserID: uid, OrganizationID: scope.org.ID,
-		Start: ptts(first), Start_2: ptts(last),
+		Column4: ptts(last), Column3: ptts(first),
 	})
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
@@ -323,7 +323,7 @@ func (s *Server) handleTotalWeeklyBillableTime(w http.ResponseWriter, r *http.Re
 	first, last := currentWeekBounds(loc, u.WeekStart)
 	total, err := db.New(s.pool).TimeEntriesBillableSumBetween(r.Context(), db.TimeEntriesBillableSumBetweenParams{
 		UserID: uid, OrganizationID: scope.org.ID,
-		Start: ptts(first), Start_2: ptts(last),
+		Column4: ptts(last), Column3: ptts(first),
 	})
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
@@ -347,7 +347,7 @@ func (s *Server) handleTotalWeeklyBillableAmount(w http.ResponseWriter, r *http.
 	first, last := currentWeekBounds(loc, u.WeekStart)
 	total, err := db.New(s.pool).TimeEntriesBillableAmountBetween(r.Context(), db.TimeEntriesBillableAmountBetweenParams{
 		UserID: uid, OrganizationID: scope.org.ID,
-		Start: ptts(first), Start_2: ptts(last),
+		Column4: ptts(last), Column3: ptts(first),
 	})
 	if err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
