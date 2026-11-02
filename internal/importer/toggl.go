@@ -96,12 +96,12 @@ func (b *base) importTogglTimeEntries(ctx context.Context, data []byte, timezone
 		if err := b.insertTimeEntry(ctx, timeEntryCreate{
 			UserID: userID, MemberID: memberID, TaskID: taskID,
 			ProjectID: projectID, ClientID: clientID,
-			Description: rec["Description"],
-			Billable:    billable,
+			Description:  rec["Description"],
+			Billable:     billable,
 			BillableRate: b.billableRate(billable, projectMember, project, member),
-			Tags:        tagIDs,
-			Start:       start,
-			End:         end,
+			Tags:         tagIDs,
+			Start:        start,
+			End:          end,
 		}); err != nil {
 			return err
 		}

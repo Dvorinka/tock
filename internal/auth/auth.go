@@ -94,9 +94,9 @@ type Session struct {
 	Destroy bool
 }
 
-func (s *Session) Get(key string) any        { return s.Data[key] }
-func (s *Session) Set(key string, v any)     { s.Data[key] = v; s.Dirty = true }
-func (s *Session) Delete(key string)         { delete(s.Data, key); s.Dirty = true }
+func (s *Session) Get(key string) any    { return s.Data[key] }
+func (s *Session) Set(key string, v any) { s.Data[key] = v; s.Dirty = true }
+func (s *Session) Delete(key string)     { delete(s.Data, key); s.Dirty = true }
 func (s *Session) GetString(key string) string {
 	v, _ := s.Data[key].(string)
 	return v

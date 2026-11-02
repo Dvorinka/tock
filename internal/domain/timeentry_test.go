@@ -38,7 +38,7 @@ func insertEntry(t *testing.T, s *Service, org db.Organization, member db.Member
 	t.Helper()
 	entry, err := db.New(s.pool).InsertTimeEntry(context.Background(), db.InsertTimeEntryParams{
 		ID: newUUID(), Description: "e", Start: pgtype.Timestamp{Time: start, Valid: true},
-		End: pgtype.Timestamp{Time: end, Valid: end.Year() > 1},
+		End:    pgtype.Timestamp{Time: end, Valid: end.Year() > 1},
 		UserID: member.UserID, OrganizationID: org.ID, MemberID: member.ID,
 		ProjectID: project, Billable: billable, Type: "work",
 	})

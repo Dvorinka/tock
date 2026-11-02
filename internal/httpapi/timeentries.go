@@ -6,10 +6,10 @@ package httpapi
 // is assembled here with bound parameters rather than sqlc.
 
 import (
-	"log/slog"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -94,10 +94,10 @@ func (f *teFilter) add(clause string) { f.where = append(f.where, clause) }
 // uuidList normalizes an ID filter like upstream idArrayToCollection: values
 // must be UUIDs or the literal 'none' (included as the null row).
 type idList struct {
-	ids    []pgtype.UUID
-	none   bool
-	empty  bool // input present but reduced to nothing and no 'none'
-	given  bool
+	ids     []pgtype.UUID
+	none    bool
+	empty   bool // input present but reduced to nothing and no 'none'
+	given   bool
 	invalid bool
 }
 
@@ -536,7 +536,11 @@ type teVals struct {
 func (s *Server) validateTimeEntryBody(w http.ResponseWriter, r *http.Request, scope *orgScope, body map[string]json.RawMessage, existing *db.TimeEntry, required bool) (map[string][]string, *teVals) {
 	errs := map[string][]string{}
 	v := &teVals{entryType: timeEntryTypeWork}
-	defer func() { if len(errs) > 0 { slog.WarnContext(r.Context(), "te validation", "errs", errs) } }()
+	defer func() {
+		if len(errs) > 0 {
+			slog.WarnContext(r.Context(), "te validation", "errs", errs)
+		}
+	}()
 	q := db.New(s.pool)
 
 	resultingType := ""
@@ -929,7 +933,9 @@ func (s *Server) handleUpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	_ = domain.RecalculateSpentTime(r.Context(), q, oldProject, oldTask)
+	if err := domain.RecalculateSpentTime(r.Context(), q, oldProject, oldTask); err != nil {
+		slog.ErrorContext(r.Context(), "recalculate spent_time after update", "time_entry", domain.UUIDString(entry.ID), "err", err)
+	}
 	newProject, newTask := entry.ProjectID, entry.TaskID
 	if oldProject != newProject {
 		_ = domain.RecalculateSpentTime(r.Context(), q, newProject, pgtype.UUID{})
@@ -1145,6 +1151,8 @@ func (s *Server) handleUpdateMultipleTimeEntries(w http.ResponseWriter, r *http.
 
 	success := []string{}
 	errList := []string{}
+	affectedProjects := map[string]pgtype.UUID{}
+	affectedTasks := map[string]pgtype.UUID{}
 	for _, idStr := range payload.IDs {
 		entry, found := byID[idStr]
 		if !found {
@@ -1239,14 +1247,29 @@ func (s *Server) handleUpdateMultipleTimeEntries(w http.ResponseWriter, r *http.
 			continue
 		}
 		s.recordAudit(r, audit.EventUpdated, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, auditBefore, timeEntryAttrs(entry))
-		_ = domain.RecalculateSpentTime(r.Context(), q, oldProject, oldTask)
-		if oldProject != entry.ProjectID {
-			_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, pgtype.UUID{})
+		if oldProject.Valid {
+			affectedProjects[domain.UUIDString(oldProject)] = oldProject
 		}
-		if oldTask != entry.TaskID {
-			_ = domain.RecalculateSpentTime(r.Context(), q, pgtype.UUID{}, entry.TaskID)
+		if entry.ProjectID.Valid {
+			affectedProjects[domain.UUIDString(entry.ProjectID)] = entry.ProjectID
+		}
+		if oldTask.Valid {
+			affectedTasks[domain.UUIDString(oldTask)] = oldTask
+		}
+		if entry.TaskID.Valid {
+			affectedTasks[domain.UUIDString(entry.TaskID)] = entry.TaskID
 		}
 		success = append(success, idStr)
+	}
+	for _, projectID := range affectedProjects {
+		if err := domain.RecalculateSpentTime(r.Context(), q, projectID, pgtype.UUID{}); err != nil {
+			slog.ErrorContext(r.Context(), "recalculate project spent_time after bulk update", "project", domain.UUIDString(projectID), "err", err)
+		}
+	}
+	for _, taskID := range affectedTasks {
+		if err := domain.RecalculateSpentTime(r.Context(), q, pgtype.UUID{}, taskID); err != nil {
+			slog.ErrorContext(r.Context(), "recalculate task spent_time after bulk update", "task", domain.UUIDString(taskID), "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": success, "error": errList})
 }
@@ -1286,7 +1309,9 @@ func (s *Server) handleDestroyTimeEntry(w http.ResponseWriter, r *http.Request) 
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, entry.TaskID)
+	if err := domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, entry.TaskID); err != nil {
+		slog.ErrorContext(r.Context(), "recalculate spent_time after delete", "time_entry", domain.UUIDString(entry.ID), "err", err)
+	}
 	s.recordAudit(r, audit.EventDeleted, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, timeEntryAttrs(entry), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1333,6 +1358,10 @@ func (s *Server) handleDestroyMultipleTimeEntries(w http.ResponseWriter, r *http
 	q := db.New(s.pool)
 	success := []string{}
 	errList := []string{}
+	// Deduplicate project and task totals across the batch, then recalculate
+	// after all successful deletes so each total reflects the whole batch.
+	affectedProjects := map[string]pgtype.UUID{}
+	affectedTasks := map[string]pgtype.UUID{}
 	for _, idStr := range payload.IDs {
 		entry, found := byID[idStr]
 		if !found {
@@ -1348,8 +1377,23 @@ func (s *Server) handleDestroyMultipleTimeEntries(w http.ResponseWriter, r *http
 			continue
 		}
 		s.recordAudit(r, audit.EventDeleted, audit.TypeTimeEntry, entry.ID, scope.org.ID, pgtype.UUID{}, timeEntryAttrs(entry), nil)
-		_ = domain.RecalculateSpentTime(r.Context(), q, entry.ProjectID, entry.TaskID)
+		if entry.ProjectID.Valid {
+			affectedProjects[domain.UUIDString(entry.ProjectID)] = entry.ProjectID
+		}
+		if entry.TaskID.Valid {
+			affectedTasks[domain.UUIDString(entry.TaskID)] = entry.TaskID
+		}
 		success = append(success, idStr)
+	}
+	for _, projectID := range affectedProjects {
+		if err := domain.RecalculateSpentTime(r.Context(), q, projectID, pgtype.UUID{}); err != nil {
+			slog.ErrorContext(r.Context(), "recalculate project spent_time after bulk delete", "project", domain.UUIDString(projectID), "err", err)
+		}
+	}
+	for _, taskID := range affectedTasks {
+		if err := domain.RecalculateSpentTime(r.Context(), q, pgtype.UUID{}, taskID); err != nil {
+			slog.ErrorContext(r.Context(), "recalculate task spent_time after bulk delete", "task", domain.UUIDString(taskID), "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": success, "error": errList})
 }

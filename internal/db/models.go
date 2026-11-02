@@ -77,6 +77,21 @@ type Goal struct {
 	UpdatedAt      pgtype.Timestamp
 }
 
+type ImportRun struct {
+	ID             pgtype.UUID
+	OrganizationID pgtype.UUID
+	UserID         pgtype.UUID
+	ImporterType   string
+	Timezone       string
+	Data           []byte
+	Status         string
+	Report         []byte
+	Error          *string
+	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+	CompletedAt    pgtype.Timestamp
+}
+
 type Invoice struct {
 	ID                    pgtype.UUID
 	OrganizationID        pgtype.UUID

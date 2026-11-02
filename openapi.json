@@ -712,6 +712,148 @@
                     }
                 }
             }
+        },
+        "\/v1\/organizations\/{organization}\/import": {
+            "post": {
+                "operationId": "importData",
+                "summary": "Import organization data",
+                "tags": [
+                    "Organization"
+                ],
+                "parameters": [
+                    {
+                        "name": "organization",
+                        "in": "path",
+                        "required": true,
+                        "description": "The organization ID",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application\/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string"
+                                    },
+                                    "data": {
+                                        "type": "string",
+                                        "description": "Base64-encoded CSV or ZIP data."
+                                    },
+                                    "async": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "required": [
+                                    "type",
+                                    "data"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Import completed synchronously.",
+                        "content": {
+                            "application\/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "report": {
+                                            "$ref": "#\/components\/schemas\/ImportReport"
+                                        }
+                                    },
+                                    "required": [
+                                        "report"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "202": {
+                        "description": "Import queued for background processing.",
+                        "content": {
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ImportQueued"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "$ref": "#\/components\/responses\/AuthorizationException"
+                    },
+                    "400": {
+                        "$ref": "#\/components\/responses\/BadRequestException"
+                    },
+                    "401": {
+                        "$ref": "#\/components\/responses\/UnauthenticatedException"
+                    },
+                    "404": {
+                        "$ref": "#\/components\/responses\/ModelNotFoundException"
+                    }
+                }
+            }
+        },
+        "\/v1\/organizations\/{organization}\/imports\/{importRun}": {
+            "get": {
+                "operationId": "getImportRun",
+                "summary": "Get import status",
+                "tags": [
+                    "Organization"
+                ],
+                "parameters": [
+                    {
+                        "name": "organization",
+                        "in": "path",
+                        "required": true,
+                        "description": "The organization ID",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "importRun",
+                        "in": "path",
+                        "required": true,
+                        "description": "The import run ID",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current import status.",
+                        "content": {
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ImportRunStatus"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "$ref": "#\/components\/responses\/AuthorizationException"
+                    },
+                    "404": {
+                        "$ref": "#\/components\/responses\/ModelNotFoundException"
+                    },
+                    "401": {
+                        "$ref": "#\/components\/responses\/UnauthenticatedException"
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -838,6 +980,150 @@
                     "tags"
                 ],
                 "title": "TimeEntryResource"
+            },
+            "ImportReport": {
+                "type": "object",
+                "properties": {
+                    "clients": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    },
+                    "projects": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    },
+                    "tasks": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    },
+                    "time_entries": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    },
+                    "tags": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    },
+                    "users": {
+                        "type": "object",
+                        "properties": {
+                            "created": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "created"
+                        ]
+                    }
+                },
+                "required": [
+                    "clients",
+                    "projects",
+                    "tasks",
+                    "time_entries",
+                    "tags",
+                    "users"
+                ]
+            },
+            "ImportQueued": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "status": {
+                        "type": "string",
+                        "const": "queued"
+                    }
+                },
+                "required": [
+                    "id",
+                    "status"
+                ]
+            },
+            "ImportRunStatus": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "format": "uuid"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": [
+                                    "queued",
+                                    "processing",
+                                    "completed",
+                                    "failed"
+                                ]
+                            },
+                            "report": {
+                                "anyOf": [
+                                    {
+                                        "$ref": "#\/components\/schemas\/ImportReport"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ]
+                            },
+                            "error": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "status",
+                            "report",
+                            "error"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             }
         },
         "responses": {
@@ -904,6 +1190,42 @@
                             "required": [
                                 "message",
                                 "errors"
+                            ]
+                        }
+                    }
+                }
+            },
+            "BadRequestException": {
+                "description": "Bad request",
+                "content": {
+                    "application\/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "message"
+                            ]
+                        }
+                    }
+                }
+            },
+            "UnauthenticatedException": {
+                "description": "Unauthenticated",
+                "content": {
+                    "application\/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "message"
                             ]
                         }
                     }

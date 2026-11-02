@@ -109,14 +109,16 @@ jobs:
           TOCK_DB_DSN: postgres://tock:tock@127.0.0.1:5432/tock_test?sslmode=disable
 
       - name: Test
-        run: go test $(go list ./... | grep -v /node_modules/)
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v /node_modules/)
+          go test "${packages[@]}"
         env:
           TOCK_TEST_DSN: postgres://tock:tock@127.0.0.1:5432/tock_test?sslmode=disable
 
       - name: Smoke — serve answers 401 on /api/v1/users/me
         run: |
           ./bin/tock serve --no-jobs -addr 127.0.0.1:18080 &
-          for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:18080/login && break; sleep 1; done
+          for _ in {1..30}; do curl -sf -o /dev/null http://127.0.0.1:18080/login && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/v1/users/me)" = 401
           curl -sf http://127.0.0.1:18080/login | grep -q 'id="app"'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/unknown)" = 404

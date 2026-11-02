@@ -145,6 +145,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 
 				r.Get("/organizations/{organization}/importers", srv.handleImporters)
 				r.Post("/organizations/{organization}/import", srv.handleImport)
+				r.Get("/organizations/{organization}/imports/{importRun}", srv.handleImportStatus)
 
 				// Entity surface — clients, projects, project members,
 				// tags, tasks (routes/api.php verbatim).

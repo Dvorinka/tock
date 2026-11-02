@@ -127,6 +127,6 @@ Only after 1–3. Candidates (verify before committing):
 - `just verify` green before every push. Conventional commits,
   `Authored By: TDvorak <info@tdvorak.dev>` trailer.
 - Feature branches + PRs to `main`, never push `main` directly.
-- Update `~/agent-memory` (`projects/tock.md`) with durable state at
+- Update the private agent-memory repo with durable state at
   each milestone — next session must survive on it alone.
 - Read `PLAN.md` and `AGENTS.md` before backend decisions.

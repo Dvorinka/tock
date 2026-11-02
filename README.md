@@ -17,7 +17,8 @@ the audit log — is built in, ungated, and shipped to everyone.
 - Invoicing: draft → sent → paid lifecycle, VAT/discounts/reverse charge,
   PDF via Gotenberg, UBL e-invoice export
 - Audit log of every mutation
-- Importers: Toggl, Clockify, Harvest, generic CSV, solidtime exports
+- Importers: Toggl, Clockify, Harvest, generic CSV, solidtime exports, with
+  queued progress for SPA imports
 - OAuth2 API — the stock solidtime desktop app and browser extension pair
   unmodified
 

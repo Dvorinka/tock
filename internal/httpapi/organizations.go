@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -990,8 +992,8 @@ func (s *Server) sendInvitationMail(r *http.Request, inv db.OrganizationInvitati
 	body := "You have been invited to join the " + org.Name + " organization!\n\n" +
 		"Accept Invitation: " + url + "\n\n" +
 		"If you did not expect to receive an invitation to this organization, you may discard this email."
-	htmlBody := "<p>You have been invited to join the " + org.Name + " organization!</p>" +
-		`<p><a href="` + url + `">Accept Invitation</a></p>` +
+	htmlBody := "<p>You have been invited to join the " + template.HTMLEscapeString(org.Name) + " organization!</p>" +
+		`<p><a href="` + template.HTMLEscapeString(url) + `">Accept Invitation</a></p>` +
 		"<p>If you did not expect to receive an invitation to this organization, you may discard this email.</p>"
 	if s.pool != nil {
 		_ = jobs.EnqueueMailHTML(r.Context(), s.pool, inv.Email, "Organization Invitation", body, htmlBody)
@@ -1105,8 +1107,9 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Type string `json:"type"`
-		Data string `json:"data"`
+		Type  string `json:"type"`
+		Data  string `json:"data"`
+		Async bool   `json:"async"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	errs := map[string][]string{}
@@ -1136,6 +1139,42 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if u := auth.UserFromContext(r.Context()); u != nil && u.Timezone != "" {
 		tz = u.Timezone
 	}
+	if body.Async {
+		u := auth.UserFromContext(r.Context())
+		if u == nil {
+			writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+			return
+		}
+		userID, validUserID := domain.UUID(u.ID)
+		if !validUserID {
+			writeMessage(w, http.StatusUnauthorized, "Unauthenticated.")
+			return
+		}
+		tx, err := s.pool.Begin(r.Context())
+		if err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+		runID := pgtype.UUID{Bytes: uuid.Must(uuid.NewV7()), Valid: true}
+		if _, err := db.New(tx).CreateImportRun(r.Context(), db.CreateImportRunParams{
+			ID: runID, OrganizationID: scope.org.ID, UserID: userID,
+			ImporterType: body.Type, Timezone: tz, Data: data,
+		}); err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		if err := jobs.EnqueueTx(r.Context(), tx, "default", importer.RunJobType, importer.RunJobPayload{ID: domain.UUIDString(runID)}); err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeMessage(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"id": domain.UUIDString(runID), "status": "queued"})
+		return
+	}
 	report, err := s.importer.Import(r.Context(), scope.org, body.Type, data, tz)
 	if err != nil {
 		var ie *importer.Error
@@ -1147,6 +1186,36 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report": report.Map()})
+}
+
+func (s *Server) handleImportStatus(w http.ResponseWriter, r *http.Request) {
+	scope, ok := s.resolveOrg(w, r, "import")
+	if !ok {
+		return
+	}
+	runID, ok := domain.UUID(chi.URLParam(r, "importRun"))
+	if !ok {
+		writeMessage(w, http.StatusNotFound, "Not found")
+		return
+	}
+	run, err := db.New(s.pool).GetImportRun(r.Context(), db.GetImportRunParams{
+		ID: runID, OrganizationID: scope.org.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeMessage(w, http.StatusNotFound, "Not found")
+		return
+	}
+	if err != nil {
+		writeMessage(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	var report json.RawMessage
+	if len(run.Report) > 0 {
+		report = run.Report
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"id": domain.UUIDString(run.ID), "status": run.Status, "report": report, "error": run.Error},
+	})
 }
 
 // ---- currencies / timezones (public like upstream) ----

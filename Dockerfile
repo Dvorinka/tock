@@ -1,12 +1,12 @@
 # tock — single-image build: Vue SPA -> static bundle -> Go binary.
-FROM node:20-alpine AS spa
+FROM node:22-alpine AS spa
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM golang:1.24-alpine AS gobuild
+FROM golang:1.27.3-alpine AS gobuild
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

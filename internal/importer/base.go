@@ -19,8 +19,8 @@ type (
 // base is the port of DefaultImporter: shared entity helpers plus counters.
 // Billable rates are always usable in tock (no plan gates).
 type base struct {
-	q    *db.Queries
-	org  db.Organization
+	q   *db.Queries
+	org db.Organization
 
 	users          *helper[db.ImportListUsersRow]
 	members        *helper[db.ImportListMembersRow]
@@ -258,13 +258,13 @@ func marshalUUIDs(ids []pgtype.UUID) ([]byte, error) {
 // timeEntryCreate bundles one imported time entry insert.
 type timeEntryCreate struct {
 	UserID, MemberID, TaskID, ProjectID, ClientID pgtype.UUID
-	Description                                    string
-	Billable                                       bool
-	BillableRate                                   *int32
-	Tags                                           []pgtype.UUID
-	Start, End                                     time.Time
-	StillActiveEmailSentAt                         pgtype.Timestamp
-	Type                                           string
+	Description                                   string
+	Billable                                      bool
+	BillableRate                                  *int32
+	Tags                                          []pgtype.UUID
+	Start, End                                    time.Time
+	StillActiveEmailSentAt                        pgtype.Timestamp
+	Type                                          string
 }
 
 func (b *base) insertTimeEntry(ctx context.Context, e timeEntryCreate) error {

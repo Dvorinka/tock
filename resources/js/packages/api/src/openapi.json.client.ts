@@ -38,7 +38,31 @@ const ClientUpdateRequest = z
     .object({ name: z.string().min(1).max(255), is_archived: z.boolean().optional() })
     .passthrough();
 const DestroyWithPasswordRequest = z.object({ password: z.string() }).passthrough();
-const ImportRequest = z.object({ type: z.string(), data: z.string() }).passthrough();
+const ImportRequest = z
+    .object({ type: z.string(), data: z.string(), async: z.boolean().optional() })
+    .passthrough();
+const ImportReportResource = z
+    .object({
+        clients: z.object({ created: z.number().int() }).passthrough(),
+        projects: z.object({ created: z.number().int() }).passthrough(),
+        tasks: z.object({ created: z.number().int() }).passthrough(),
+        time_entries: z.object({ created: z.number().int() }).passthrough(),
+        tags: z.object({ created: z.number().int() }).passthrough(),
+        users: z.object({ created: z.number().int() }).passthrough(),
+    })
+    .passthrough();
+const ImportRunStatusResource = z
+    .object({
+        data: z
+            .object({
+                id: z.string(),
+                status: z.enum(['queued', 'processing', 'completed', 'failed']),
+                report: z.union([ImportReportResource, z.null()]),
+                error: z.union([z.string(), z.null()]),
+            })
+            .passthrough(),
+    })
+    .passthrough();
 const InvitationResource = z
     .object({ id: z.string(), email: z.string(), role: z.string() })
     .passthrough();
@@ -1672,20 +1696,10 @@ const endpoints = makeApi([
                 schema: z.string(),
             },
         ],
-        response: z
-            .object({
-                report: z
-                    .object({
-                        clients: z.object({ created: z.number().int() }).passthrough(),
-                        projects: z.object({ created: z.number().int() }).passthrough(),
-                        tasks: z.object({ created: z.number().int() }).passthrough(),
-                        time_entries: z.object({ created: z.number().int() }).passthrough(),
-                        tags: z.object({ created: z.number().int() }).passthrough(),
-                        users: z.object({ created: z.number().int() }).passthrough(),
-                    })
-                    .passthrough(),
-            })
-            .passthrough(),
+        response: z.union([
+            z.object({ report: ImportReportResource }),
+            z.object({ id: z.string(), status: z.literal('queued') }),
+        ]),
         errors: [
             {
                 status: 400,
@@ -1739,6 +1753,34 @@ const endpoints = makeApi([
                 ),
             })
             .passthrough(),
+        errors: [
+            {
+                status: 401,
+                description: `Unauthenticated`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 403,
+                description: `Authorization error`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+            {
+                status: 404,
+                description: `Not found`,
+                schema: z.object({ message: z.string() }).passthrough(),
+            },
+        ],
+    },
+    {
+        method: 'get',
+        path: '/v1/organizations/:organization/imports/:importRun',
+        alias: 'getImportRun',
+        requestFormat: 'json',
+        parameters: [
+            { name: 'organization', type: 'Path', schema: z.string() },
+            { name: 'importRun', type: 'Path', schema: z.string() },
+        ],
+        response: ImportRunStatusResource,
         errors: [
             {
                 status: 401,

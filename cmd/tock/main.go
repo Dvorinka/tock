@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,10 +18,12 @@ import (
 	"github.com/Dvorinka/tock/internal/config"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/httpapi"
+	"github.com/Dvorinka/tock/internal/importer"
 	"github.com/Dvorinka/tock/internal/jobs"
 	"github.com/Dvorinka/tock/internal/mcpserver"
 	"github.com/Dvorinka/tock/internal/seed"
 	"github.com/Dvorinka/tock/internal/tockapi"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -128,8 +131,7 @@ func cmdServe(args []string) error {
 	}
 
 	if !*noJobs {
-		worker := jobs.New(pool)
-		worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+		worker := newWorker(pool, cfg)
 		go func() {
 			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				cfg.Logger.Error("job worker stopped", "error", err)
@@ -155,6 +157,20 @@ func cmdServe(args []string) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+func newWorker(pool *pgxpool.Pool, cfg config.Config) *jobs.Worker {
+	worker := jobs.New(pool)
+	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+	imports := importer.New(pool, cfg.StorageDir)
+	worker.Handle(importer.RunJobType, func(ctx context.Context, data json.RawMessage) error {
+		var payload importer.RunJobPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return fmt.Errorf("decode import job: %w", err)
+		}
+		return imports.ProcessRun(ctx, payload.ID)
+	})
+	return worker
 }
 
 func cmdMigrate(args []string) error {
@@ -210,8 +226,7 @@ func cmdWorker(args []string) error {
 	defer pool.Close()
 
 	cfg.Logger.Info("job worker started")
-	worker := jobs.New(pool)
-	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+	worker := newWorker(pool, cfg)
 	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("worker: %w", err)
 	}

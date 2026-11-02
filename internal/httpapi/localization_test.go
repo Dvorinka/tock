@@ -60,12 +60,12 @@ func TestFormatCurrencyMatchesUpstream(t *testing.T) {
 func TestFormatDateMatchesUpstream(t *testing.T) {
 	d := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
 	cases := map[string]string{
-		"point-separated-d-m-yyyy":     "7.3.2026",
-		"slash-separated-mm-dd-yyyy":   "03/07/2026",
-		"slash-separated-dd-mm-yyyy":   "07/03/2026",
-		"hyphen-separated-dd-mm-yyyy":  "07-03-2026",
-		"hyphen-separated-mm-dd-yyyy":  "03-07-2026",
-		"hyphen-separated-yyyy-mm-dd":  "2026-03-07",
+		"point-separated-d-m-yyyy":    "7.3.2026",
+		"slash-separated-mm-dd-yyyy":  "03/07/2026",
+		"slash-separated-dd-mm-yyyy":  "07/03/2026",
+		"hyphen-separated-dd-mm-yyyy": "07-03-2026",
+		"hyphen-separated-mm-dd-yyyy": "03-07-2026",
+		"hyphen-separated-yyyy-mm-dd": "2026-03-07",
 	}
 	for format, want := range cases {
 		got := locWith("", "", format, "", "", "EUR").formatDate(d)

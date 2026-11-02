@@ -18,7 +18,10 @@ import (
 
 // Error mirrors upstream's ImportException: a user-facing import failure that
 // is rendered as a 400 with the message verbatim.
-type Error struct{ msg string }
+type Error struct {
+	msg       string
+	retryable bool
+}
 
 func (e *Error) Error() string { return e.msg }
 
@@ -32,15 +35,15 @@ func fail(format string, args ...any) *Error {
 // modelByID are remembered so the caller can later iterate "used" entities
 // (upstream getCachedModels) for spent_time recalculation.
 type helper[T any] struct {
-	load   func(ctx context.Context) ([]T, error)
-	ident  func(T) []any
-	idOf   func(T) pgtype.UUID
-	loaded bool
-	byKey  map[string]pgtype.UUID
-	byID   map[pgtype.UUID]T
-	byExt  map[string]string
-	used   []T
-	usedIn map[pgtype.UUID]bool
+	load    func(ctx context.Context) ([]T, error)
+	ident   func(T) []any
+	idOf    func(T) pgtype.UUID
+	loaded  bool
+	byKey   map[string]pgtype.UUID
+	byID    map[pgtype.UUID]T
+	byExt   map[string]string
+	used    []T
+	usedIn  map[pgtype.UUID]bool
 	created int
 }
 
