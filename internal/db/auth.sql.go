@@ -23,7 +23,7 @@ func (q *Queries) ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 
 const consumeAuthCode = `-- name: ConsumeAuthCode :one
 DELETE FROM oauth_auth_codes WHERE id = $1 AND revoked = false AND expires_at > now()
-RETURNING id, user_id, client_id, scopes, revoked, expires_at
+RETURNING id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method
 `
 
 func (q *Queries) ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error) {
@@ -36,6 +36,8 @@ func (q *Queries) ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode
 		&i.Scopes,
 		&i.Revoked,
 		&i.ExpiresAt,
+		&i.CodeChallenge,
+		&i.CodeChallengeMethod,
 	)
 	return i, err
 }
@@ -422,16 +424,18 @@ func (q *Queries) InsertAccessToken(ctx context.Context, arg InsertAccessTokenPa
 }
 
 const insertAuthCode = `-- name: InsertAuthCode :exec
-INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at)
-VALUES ($1, $2, $3, $4, false, $5)
+INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method)
+VALUES ($1, $2, $3, $4, false, $5, $6, $7)
 `
 
 type InsertAuthCodeParams struct {
-	ID        string
-	UserID    pgtype.UUID
-	ClientID  pgtype.UUID
-	Scopes    *string
-	ExpiresAt pgtype.Timestamp
+	ID                  string
+	UserID              pgtype.UUID
+	ClientID            pgtype.UUID
+	Scopes              *string
+	ExpiresAt           pgtype.Timestamp
+	CodeChallenge       *string
+	CodeChallengeMethod *string
 }
 
 func (q *Queries) InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) error {
@@ -441,6 +445,8 @@ func (q *Queries) InsertAuthCode(ctx context.Context, arg InsertAuthCodeParams) 
 		arg.ClientID,
 		arg.Scopes,
 		arg.ExpiresAt,
+		arg.CodeChallenge,
+		arg.CodeChallengeMethod,
 	)
 	return err
 }

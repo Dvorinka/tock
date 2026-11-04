@@ -80,6 +80,19 @@ func (s *Server) saveProfilePhoto(userID, dataURL string) (string, error) {
 	return "profile-photos/" + name, nil
 }
 
+// removeProfilePhoto deletes an uploaded avatar. Only files under
+// profile-photos/ are removed, so a bad path cannot escape the storage root.
+func (s *Server) removeProfilePhoto(path *string) {
+	if s.storageDir == "" || path == nil || !strings.HasPrefix(*path, "profile-photos/") {
+		return
+	}
+	base := filepath.Base(*path)
+	if base == "." || base == ".." || base == "" {
+		return
+	}
+	_ = os.Remove(filepath.Join(s.storageDir, "profile-photos", base))
+}
+
 // handleStorageFile serves uploaded public assets (profile photos) — the
 // Laravel `storage:link` equivalent.
 func (s *Server) handleStorageFile(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +320,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		sendMail = *body.SendStillRunningEmail
 	}
 	photoPath := u.ProfilePhotoPath
+	previousPhoto := u.ProfilePhotoPath
 	if len(body.Photo) > 0 {
 		if string(body.Photo) == "null" {
 			photoPath = nil
@@ -332,6 +346,9 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		u.ID, name, timezone, weekStart, sendMail, pending, photoPath); err != nil {
 		writeMessage(w, http.StatusInternalServerError, "server error")
 		return
+	}
+	if previousPhoto != nil && (photoPath == nil || *photoPath != *previousPhoto) {
+		s.removeProfilePhoto(previousPhoto)
 	}
 	u.Name, u.Timezone, u.WeekStart, u.PendingEmail = name, timezone, weekStart, pending
 	u.ProfilePhotoPath = photoPath
@@ -382,6 +399,7 @@ func (s *Server) handleDestroyUser(w http.ResponseWriter, r *http.Request) {
 		writeDomainErr(w, err)
 		return
 	}
+	s.removeProfilePhoto(u.ProfilePhotoPath)
 	w.WriteHeader(http.StatusNoContent)
 }
 

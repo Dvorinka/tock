@@ -217,12 +217,14 @@ type OauthAccessToken struct {
 }
 
 type OauthAuthCode struct {
-	ID        string
-	UserID    pgtype.UUID
-	ClientID  pgtype.UUID
-	Scopes    *string
-	Revoked   bool
-	ExpiresAt pgtype.Timestamp
+	ID                  string
+	UserID              pgtype.UUID
+	ClientID            pgtype.UUID
+	Scopes              *string
+	Revoked             bool
+	ExpiresAt           pgtype.Timestamp
+	CodeChallenge       *string
+	CodeChallengeMethod *string
 }
 
 type OauthClient struct {

@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -270,32 +269,23 @@ func (s *Server) HandleToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) grantAuthCode(w http.ResponseWriter, r *http.Request) {
 	code := r.Form.Get("code")
 	var userID, clientID string
-	var scopes *string
+	var scopes, challenge, method *string
 	var expiresAt time.Time
 	err := s.pool.QueryRow(r.Context(), `
 		DELETE FROM oauth_auth_codes WHERE id = $1 AND revoked = false AND expires_at > now()
-		RETURNING user_id, client_id, scopes, expires_at`, code).
-		Scan(&userID, &clientID, &scopes, &expiresAt)
+		RETURNING user_id, client_id, scopes, expires_at, code_challenge, code_challenge_method`, code).
+		Scan(&userID, &clientID, &scopes, &expiresAt, &challenge, &method)
 	if err != nil {
 		writeOAuthError(w, 400, "invalid_grant", "authorization code invalid or expired")
 		return
 	}
-	// PKCE: auth code id encodes the challenge — stored alongside via session on issue.
-	if meta, ok := pendingCodes.Load(code); ok {
-		m := meta.(codeMeta)
-		if r.Form.Get("client_id") != m.clientID {
-			writeOAuthError(w, 400, "invalid_grant", "client mismatch")
-			return
-		}
-		if m.challenge != "" {
-			v := r.Form.Get("code_verifier")
-			sum := sha256.Sum256([]byte(v))
-			if base64.RawURLEncoding.EncodeToString(sum[:]) != m.challenge && v != m.challenge {
-				writeOAuthError(w, 400, "invalid_grant", "PKCE verification failed")
-				return
-			}
-		}
-		pendingCodes.Delete(code)
+	if r.Form.Get("client_id") != clientID {
+		writeOAuthError(w, 400, "invalid_grant", "client mismatch")
+		return
+	}
+	if !pkceMatches(deref(method), deref(challenge), r.Form.Get("code_verifier")) {
+		writeOAuthError(w, 400, "invalid_grant", "PKCE verification failed")
+		return
 	}
 	access, refresh, err := s.issueToken(r.Context(), userID, clientID, nil, parseScopes(scopes))
 	if err != nil {
@@ -354,15 +344,6 @@ func parseScopes(raw *string) []string {
 	return strings.Fields(*raw)
 }
 
-type codeMeta struct {
-	clientID  string
-	challenge string
-}
-
-// shortcut: PKCE challenge for an issued code lives in-process. Upgrade to a
-// column on oauth_auth_codes if multi-replica deployments need the exchange.
-var pendingCodes sync.Map
-
 // Authorize GET validates the request and either auto-approves or renders consent.
 // Render is supplied by the caller (html page or redirect).
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request,
@@ -390,27 +371,88 @@ func (s *Server) Authorize(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	scopes := strings.Fields(q.Get("scope"))
+	challenge := q.Get("code_challenge")
+	method := q.Get("code_challenge_method")
 	authReq := map[string]any{
 		"client_id": client.id, "redirect_uri": redirectURI, "state": q.Get("state"),
-		"scopes": scopes, "code_challenge": q.Get("code_challenge"),
+		"scopes": scopes, "code_challenge": challenge, "code_challenge_method": method,
 	}
 	sess.Set("authRequest", authReq)
 	sess.Set("authToken", auth.RandomToken(20))
 	if userHasGranted(r.Context(), s.pool, user.ID, client.id, scopes) {
-		s.approve(w, r, user.ID, client.id, redirectURI, q.Get("state"), q.Get("code_challenge"), scopes)
+		s.approve(w, r, user.ID, client.id, redirectURI, q.Get("state"), challenge, method, scopes)
 		return
 	}
 	renderConsent(w, r, client.id, client.name, scopes)
 }
 
-func userHasGranted(ctx context.Context, pool *pgxpool.Pool, userID, clientID string, scopes []string) bool {
-	var count int
-	_ = pool.QueryRow(ctx, `
-		SELECT count(*) FROM oauth_access_tokens
-		WHERE user_id = $1 AND client_id = $2 AND revoked = false`, userID, clientID).Scan(&count)
-	// shortcut: auto-approve when any prior token exists; scope diff check is
-	// upgrade-if-needed once scoped clients ship (upstream: hasGrantedScopes).
-	return count > 0
+func userHasGranted(ctx context.Context, pool *pgxpool.Pool, userID, clientID string, requested []string) bool {
+	rows, err := pool.Query(ctx, `
+		SELECT scopes FROM oauth_access_tokens
+		WHERE user_id = $1 AND client_id = $2 AND revoked = false AND expires_at > now()`,
+		userID, clientID)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw *string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		if scopesCover(parseScopes(raw), requested) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopesCover reports whether granted already includes every requested scope.
+// An empty request needs no extra consent. "*" covers every scope.
+func scopesCover(granted, requested []string) bool {
+	if len(requested) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(granted))
+	for _, scope := range granted {
+		if scope == "*" {
+			return true
+		}
+		have[scope] = struct{}{}
+	}
+	for _, scope := range requested {
+		if _, ok := have[scope]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func deref(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+// pkceMatches checks a verifier against the challenge stored with the auth code.
+// An empty challenge means the client did not use PKCE. An omitted method keeps
+// the previous acceptance of both S256 and plain, so existing desktop clients
+// keep pairing.
+func pkceMatches(method, challenge, verifier string) bool {
+	if challenge == "" {
+		return true
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	hashed := base64.RawURLEncoding.EncodeToString(sum[:])
+	switch method {
+	case "S256":
+		return hashed == challenge
+	case "plain":
+		return verifier == challenge && verifier != ""
+	default:
+		return hashed == challenge || (verifier != "" && verifier == challenge)
+	}
 }
 
 // ApprovePost handles POST /oauth/authorize (consent form submit).
@@ -436,7 +478,7 @@ func (s *Server) ApprovePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authorization request expired", http.StatusBadRequest)
 		return
 	}
-	s.approve(w, r, user.ID, req.clientID, req.redirectURI, req.state, req.challenge, req.scopes)
+	s.approve(w, r, user.ID, req.clientID, req.redirectURI, req.state, req.challenge, req.method, req.scopes)
 }
 
 // DenyPost handles DELETE /oauth/authorize.
@@ -465,8 +507,8 @@ func (s *Server) DenyPost(w http.ResponseWriter, r *http.Request) {
 }
 
 type authReqData struct {
-	clientID, redirectURI, state, challenge string
-	scopes                                  []string
+	clientID, redirectURI, state, challenge, method string
+	scopes                                          []string
 }
 
 func decodeAuthRequest(m map[string]any) (authReqData, error) {
@@ -478,6 +520,7 @@ func decodeAuthRequest(m map[string]any) (authReqData, error) {
 	d.redirectURI, _ = m["redirect_uri"].(string)
 	d.state, _ = m["state"].(string)
 	d.challenge, _ = m["code_challenge"].(string)
+	d.method, _ = m["code_challenge_method"].(string)
 	if ss, ok := m["scopes"].([]any); ok {
 		for _, s := range ss {
 			if str, ok := s.(string); ok {
@@ -492,17 +535,23 @@ func decodeAuthRequest(m map[string]any) (authReqData, error) {
 }
 
 func (s *Server) approve(w http.ResponseWriter, r *http.Request,
-	userID, clientID, redirectURI, state, challenge string, scopes []string) {
+	userID, clientID, redirectURI, state, challenge, method string, scopes []string) {
 	code := auth.RandomID(40)
 	scopesJSON, _ := json.Marshal(scopes)
+	var challengeArg, methodArg any
+	if challenge != "" {
+		challengeArg = challenge
+		if method != "" {
+			methodArg = method
+		}
+	}
 	if _, err := s.pool.Exec(r.Context(), `
-		INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at)
-		VALUES ($1, $2, $3, $4, false, $5)`,
-		code, userID, clientID, string(scopesJSON), time.Now().Add(authCodeTTL)); err != nil {
+		INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method)
+		VALUES ($1, $2, $3, $4, false, $5, $6, $7)`,
+		code, userID, clientID, string(scopesJSON), time.Now().Add(authCodeTTL), challengeArg, methodArg); err != nil {
 		writeOAuthError(w, 500, "server_error", err.Error())
 		return
 	}
-	pendingCodes.Store(code, codeMeta{clientID: clientID, challenge: challenge})
 	u, _ := url.Parse(redirectURI)
 	q := u.Query()
 	q.Set("code", code)

@@ -50,9 +50,9 @@ func (s *Service) DeleteUser(ctx context.Context, userID pgtype.UUID) error {
 		if err := q.DeleteAuthCodesForUser(ctx, userID); err != nil {
 			return err
 		}
-		// shortcut: profile photo file deletion — upstream removes it from the
-		// storage disk; tock has no storage layer yet (Phase 6/7). The row dies
-		// with the user, so only the file itself may linger.
+		// The account-delete HTTP handler removes the profile photo file after
+		// this transaction commits. Member merge still leaves that file.
+		// shortcut: merge/placeholder user deletes do not unlink the photo, move removal here once those paths can return the path after commit.
 		return q.DeleteUserByID(ctx, userID)
 	})
 }
