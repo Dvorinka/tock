@@ -36,7 +36,8 @@ Migrating from an existing solidtime install: see
 
 Registration is limited to 100 requests per IP per hour by default. Set
 `TOCK_RATE_LIMIT_REGISTER_PER_HOUR` to tune that limit for your deployment or
-local test suite.
+local test suite. Login is limited to 10 requests per IP per 15 minutes
+(`TOCK_RATE_LIMIT_LOGIN`). A full browser suite from one machine needs both raised.
 
 ## Development
 

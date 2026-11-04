@@ -52,7 +52,13 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	}
 	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration, cfg.SuperAdmins)
 
-	loginLimit := newIPRateLimiter(10, 15*time.Minute)
+	// Login is a credential check, so the default stays tight. A full browser
+	// suite from one IP needs TOCK_RATE_LIMIT_LOGIN raised, same as registration.
+	loginRequests := cfg.LoginRequestsPer15Min
+	if loginRequests < 1 {
+		loginRequests = 10
+	}
+	loginLimit := newIPRateLimiter(loginRequests, 15*time.Minute)
 	// Registration is a low-risk, public onboarding route. Keep a generous
 	// per-IP ceiling by default, and allow operators to tune it for their
 	// onboarding volume and local test suites.

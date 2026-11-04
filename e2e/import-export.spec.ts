@@ -118,14 +118,17 @@ test('test that importing a generic time entries CSV works', async ({ page }) =>
             (response) =>
                 response.url().includes('/import') &&
                 response.request().method() === 'POST' &&
-                response.status() === 200,
+                (response.status() === 200 || response.status() === 202),
             { timeout: 30000 }
         ),
         page.getByRole('button', { name: 'Import Data' }).click(),
     ]);
 
     // Verify success modal with import results
-    await expect(page.getByRole('heading', { name: 'Import Result' })).toBeVisible();
+    // Async imports answer 202, then the modal opens after the job poll.
+    await expect(page.getByRole('heading', { name: 'Import Result' })).toBeVisible({
+        timeout: 15000,
+    });
     await expect(page.getByText('The import was successful!')).toBeVisible();
 
     // The CSV has 2 time entries, 1 client, 2 projects, 1 task

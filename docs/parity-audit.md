@@ -67,5 +67,21 @@ Known residual (not parity bugs):
 - The calendar date fixtures now use UTC to match Playwright's configured
   timezone. Cross-day drag and resize cases passed in the focused run.
 - Registration defaults to 100 requests per IP per hour and can be tuned with
-  `TOCK_RATE_LIMIT_REGISTER_PER_HOUR` for local test volume. The complete
-  571-test Playwright inventory still needs a clean run.
+  `TOCK_RATE_LIMIT_REGISTER_PER_HOUR` for local test volume. Login defaults to
+  10 requests per IP per 15 minutes (`TOCK_RATE_LIMIT_LOGIN`).
+
+## Follow-up (2026-11-04)
+
+- Chromium inventory on `:18099` with `SUPER_ADMINS=admin@example.com`,
+  `TOCK_RATE_LIMIT_REGISTER_PER_HOUR=10000`, and `TOCK_RATE_LIMIT_LOGIN=10000`:
+  568 passed, 2 failed, 1 skipped. The skip is `test.skip` on time-page load
+  more. Both failures passed when rerun alone: Mailpit had not indexed an
+  invitation within 2.5s, and one unchanged billable-override save came back
+  `billable: true` under suite load.
+- The same suite without `SUPER_ADMINS` and with the default login cap was
+  549 passed and 21 failed: admin 403s, `POST /login` 429s, and the generic
+  CSV import test waiting for HTTP 200 while the async import returns 202
+  and still opens the result modal.
+- Forgot-password stays at 5 requests per IP per hour. A second suite against
+  the same process hits that cap. MinIO is not running locally; the Go tests
+  and this Playwright run did not need it. Firefox was not run.

@@ -26,6 +26,7 @@ type Config struct {
 	SuperAdmins                []string // SUPER_ADMINS — emails allowed into the admin panel
 	Registration               bool     // TOCK_ENABLE_REGISTRATION
 	RegisterRequestsPerHour    int      // TOCK_RATE_LIMIT_REGISTER_PER_HOUR, default 100
+	LoginRequestsPer15Min      int      // TOCK_RATE_LIMIT_LOGIN, default 10 per 15 minutes
 	AutoDBMigrate              bool     // AUTO_DB_MIGRATE — apply migrations on serve startup
 	Logger                     *slog.Logger
 }
@@ -73,6 +74,7 @@ func Load() Config {
 		SecureCookies:              env("TOCK_SECURE_COOKIES", "false") == "true",
 		Registration:               env("TOCK_ENABLE_REGISTRATION", env("APP_ENABLE_REGISTRATION", "true")) == "true" || os.Getenv("APP_ENABLE_REGISTRATION") == "on",
 		RegisterRequestsPerHour:    envInt("TOCK_RATE_LIMIT_REGISTER_PER_HOUR", 100),
+		LoginRequestsPer15Min:      envInt("TOCK_RATE_LIMIT_LOGIN", 10),
 		AutoDBMigrate:              autoMigrate == "true" || autoMigrate == "on",
 	}
 	cfg.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))

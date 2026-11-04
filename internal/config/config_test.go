@@ -69,3 +69,20 @@ func TestRegisterRateLimitDefaultsAndCanBeConfigured(t *testing.T) {
 		t.Fatalf("invalid register limit = %d, want default 100", got)
 	}
 }
+
+func TestLoginRateLimitDefaultsAndCanBeConfigured(t *testing.T) {
+	t.Setenv("TOCK_RATE_LIMIT_LOGIN", "")
+	if got := Load().LoginRequestsPer15Min; got != 10 {
+		t.Fatalf("default login limit = %d, want 10", got)
+	}
+
+	t.Setenv("TOCK_RATE_LIMIT_LOGIN", "10000")
+	if got := Load().LoginRequestsPer15Min; got != 10000 {
+		t.Fatalf("configured login limit = %d, want 10000", got)
+	}
+
+	t.Setenv("TOCK_RATE_LIMIT_LOGIN", "0")
+	if got := Load().LoginRequestsPer15Min; got != 10 {
+		t.Fatalf("invalid login limit = %d, want default 10", got)
+	}
+}
