@@ -3,7 +3,7 @@ import chroma from 'chroma-js';
 import type { Dayjs } from 'dayjs';
 import type { TimeEntry, Project, Client, Task } from '@/packages/api/src';
 import { getBreakPlacementHint } from '../utils/breakPlacement';
-import { getDayJsInstance, getLocalizedDayJs } from '../utils/time';
+import { getDayJsInstance, getLocalizedDayJs, secondsByLocalDay } from '../utils/time';
 import type { CalendarSettings } from './calendarSettings';
 import type { CalendarEvent, DayEvent } from './calendarTypes';
 
@@ -270,27 +270,13 @@ export function useCalendarEvents(params: {
 
     function computeDailyTotals(filter: (entry: TimeEntry) => boolean): Record<string, number> {
         const totals: Record<string, number> = {};
-        params
-            .timeEntries()
-            .filter(filter)
-            .forEach((entry) => {
-                const date = getLocalizedDayJs(entry.start).format('YYYY-MM-DD');
-                let durationSeconds: number;
-
-                if (entry.end !== null) {
-                    durationSeconds = getDayJsInstance()(entry.end).diff(
-                        getDayJsInstance()(entry.start),
-                        'seconds'
-                    );
-                } else {
-                    durationSeconds = Math.max(
-                        0,
-                        params.currentTime.value.diff(getDayJsInstance()(entry.start), 'seconds')
-                    );
-                }
-
-                totals[date] = (totals[date] || 0) + durationSeconds;
-            });
+        for (const entry of params.timeEntries().filter(filter)) {
+            const endIso = entry.end ?? params.currentTime.value.toISOString();
+            const slices = secondsByLocalDay(entry.start, endIso);
+            for (const [date, seconds] of Object.entries(slices)) {
+                totals[date] = (totals[date] || 0) + seconds;
+            }
+        }
         return totals;
     }
 

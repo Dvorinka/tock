@@ -193,6 +193,40 @@ export function getLocalizedDateFromTimestamp(timestamp: string) {
 }
 
 /**
+ * Split [startIso, endIso) across local midnights in `timezone`.
+ * Omit timezone to use the signed-in user's zone. A zero or negative span
+ * returns an empty map. Keys with no elapsed time are omitted.
+ */
+export function secondsByLocalDay(
+    startIso: string,
+    endIso: string,
+    timezone?: string
+): Record<string, number> {
+    const tz = timezone ?? getUserTimezone();
+    const start = dayjs.utc(startIso).tz(tz);
+    const end = dayjs.utc(endIso).tz(tz);
+    const totals: Record<string, number> = {};
+    if (!end.isAfter(start)) {
+        return totals;
+    }
+    let cursor = start;
+    while (cursor.isBefore(end)) {
+        const nextMidnight = cursor.add(1, 'day').startOf('day');
+        const sliceEnd = nextMidnight.isBefore(end) ? nextMidnight : end;
+        if (!sliceEnd.isAfter(cursor)) {
+            break;
+        }
+        const seconds = sliceEnd.diff(cursor, 'second');
+        if (seconds > 0) {
+            const key = cursor.format('YYYY-MM-DD');
+            totals[key] = (totals[key] || 0) + seconds;
+        }
+        cursor = sliceEnd;
+    }
+    return totals;
+}
+
+/**
  * Converts a local Date to a UTC-formatted ISO string.
  * Treats the Date as being in the user's timezone and converts to UTC.
  * This is the inverse of getLocalizedDayJs (which goes UTC → local).

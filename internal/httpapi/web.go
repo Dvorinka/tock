@@ -51,8 +51,10 @@ type Server struct {
 }
 
 func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool, superAdmins []string) *Server {
+	dom := domain.NewService(pool)
+	dom.SetStorageDir(storageDir)
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth, superAdmins: superAdmins,
-		domain:   domain.NewService(pool),
+		domain:   dom,
 		importer: importer.New(pool, storageDir),
 		appURL:   appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
 		gotenbergURL:  gotenbergURL,
