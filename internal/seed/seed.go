@@ -26,7 +26,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, personalClientID, personalClie
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := seedOAuthClients(ctx, tx, personalClientID, personalClientSecret); err != nil {
+	if err := ensureOAuthClients(ctx, tx, personalClientID, personalClientSecret); err != nil {
 		return err
 	}
 	if err := seedAdminUser(ctx, tx); err != nil {
@@ -39,26 +39,64 @@ func Run(ctx context.Context, pool *pgxpool.Pool, personalClientID, personalClie
 	return nil
 }
 
-func seedOAuthClients(ctx context.Context, tx pgx.Tx, personalClientID, personalClientSecret string) error {
-	// Desktop app: public authorization-code client (matches upstream seeder).
+// desktopClientID is the public authorization-code client created when none
+// exists yet. A restored upstream dump already has its own row and is left alone.
+const desktopClientID = "7f3c1a2e-6b54-4d8e-9a10-2c5b8e4f6d31"
+
+// EnsureOAuthClients inserts the desktop and personal-access clients when the
+// database has none. Existing clients, including ones from an upstream dump,
+// are not modified. Safe to call on every serve.
+func EnsureOAuthClients(ctx context.Context, pool *pgxpool.Pool, personalClientID, personalClientSecret string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := ensureOAuthClients(ctx, tx, personalClientID, personalClientSecret); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit oauth clients: %w", err)
+	}
+	return nil
+}
+
+func ensureOAuthClients(ctx context.Context, tx pgx.Tx, personalClientID, personalClientSecret string) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO oauth_clients (id, owner_id, name, secret, provider, revoked, grant_types, redirect_uris, owner_type, created_at, updated_at)
-		VALUES ($1, NULL, 'Desktop App', NULL, 'users', false, '["authorization_code","refresh_token"]', '["solidtime://oauth/callback"]', NULL, now(), now())
+		SELECT $1, NULL, 'Desktop App', NULL, 'users', false, '["authorization_code","refresh_token"]', '["solidtime://oauth/callback"]', NULL, now(), now()
+		WHERE NOT EXISTS (
+			SELECT 1 FROM oauth_clients
+			WHERE revoked = false AND redirect_uris LIKE '%solidtime://oauth/callback%'
+		)
 		ON CONFLICT (id) DO NOTHING`,
-		uuid.NewString()); err != nil {
+		desktopClientID); err != nil {
 		return fmt.Errorf("insert desktop client: %w", err)
 	}
 
-	// Personal access client: id + secret from env, secret stored bcrypt-hashed
-	// like Passport's hashed-secret cast.
+	var missing bool
+	if err := tx.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+			SELECT 1 FROM oauth_clients
+			WHERE revoked = false AND grant_types LIKE '%personal_access%'
+		)`).Scan(&missing); err != nil {
+		return fmt.Errorf("check personal access client: %w", err)
+	}
+	if !missing {
+		return nil
+	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(personalClientSecret), 10)
 	if err != nil {
 		return fmt.Errorf("hash client secret: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO oauth_clients (id, owner_id, name, secret, provider, revoked, grant_types, redirect_uris, owner_type, created_at, updated_at)
-		VALUES ($1, NULL, 'API', $2, 'users', false, '["personal_access"]', '["http://localhost"]', NULL, now(), now())
-		ON CONFLICT (id) DO UPDATE SET secret = EXCLUDED.secret`,
+		SELECT $1, NULL, 'API', $2, 'users', false, '["personal_access"]', '["http://localhost"]', NULL, now(), now()
+		WHERE NOT EXISTS (
+			SELECT 1 FROM oauth_clients
+			WHERE revoked = false AND grant_types LIKE '%personal_access%'
+		)
+		ON CONFLICT (id) DO NOTHING`,
 		personalClientID, string(hashed)); err != nil {
 		return fmt.Errorf("insert personal access client: %w", err)
 	}

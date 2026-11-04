@@ -129,6 +129,9 @@ func cmdServe(args []string) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
+	if err := seed.EnsureOAuthClients(ctx, pool, cfg.PersonalAccessClientID, cfg.PersonalAccessClientSecret); err != nil {
+		return fmt.Errorf("oauth clients: %w", err)
+	}
 
 	if !*noJobs {
 		worker := newWorker(pool, cfg)
