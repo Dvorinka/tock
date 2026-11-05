@@ -164,7 +164,7 @@ func cmdServe(args []string) error {
 
 func newWorker(pool *pgxpool.Pool, cfg config.Config) *jobs.Worker {
 	worker := jobs.New(pool)
-	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, cfg.MailFrom, cfg.SMTPUser, cfg.SMTPPassword))
 	imports := importer.New(pool, cfg.StorageDir)
 	worker.Handle(importer.RunJobType, func(ctx context.Context, data json.RawMessage) error {
 		var payload importer.RunJobPayload

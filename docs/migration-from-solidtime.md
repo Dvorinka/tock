@@ -1,14 +1,20 @@
 # Migrating from solidtime to tock
 
 tock keeps the upstream database schema identical, so an existing solidtime
-Postgres database works unchanged.
+Postgres database works unchanged. A compose file from the upstream
+self-hosting examples can switch in place. The steps and the environment
+names tock already reads are in the README section "Switch from solidtime".
 
 ## Steps
 
 1. Stop the solidtime app (PHP-FPM / Octane / FrankenPHP workers).
 2. Dump the database: `pg_dump -Fc solidtime > backup.dump` (or run tock
    against the live database — it is additive only).
-3. Point tock at the same Postgres: `TOCK_DB_DSN=postgres://user:pass@host/solidtime?sslmode=disable`.
+3. Point tock at the same Postgres. Either keep `DB_HOST`, `DB_PORT`,
+   `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, and `DB_SSL_MODE`, or set
+   `TOCK_DB_DSN`. Also keep `APP_KEY` (or set `TOCK_APP_KEY`) so sessions
+   survive a restart, and keep `GOTENBERG_URL` when Gotenberg is not on
+   `127.0.0.1:3100`.
 4. `tock serve` applies pending migrations by default (`AUTO_DB_MIGRATE=true`).
    You can also run `tock migrate` explicitly and set `AUTO_DB_MIGRATE=false`
    when starting the server. Existing upstream dumps are detected (the `users` table

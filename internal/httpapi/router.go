@@ -42,6 +42,14 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	r.Use(requestLogger(cfg.Logger))
 	r.Use(securityHeaders)
 
+	// Same path the solidtime compose healthcheck probes. The distroless
+	// image has no curl, so the check has to run from outside the container.
+	r.Get("/health-check/up", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK\n"))
+	})
+
 	sessions := auth.NewStore(pool, cfg.AppKey)
 	spa := &spaHandler{appURL: cfg.AppURL}
 	oauth, err := oauth2.New(pool,
@@ -51,6 +59,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		panic(err)
 	}
 	srv := NewServer(pool, spa, sessions, oauth, cfg.AppURL, cfg.AppKey, cfg.SMTPAddr, cfg.StorageDir, cfg.GotenbergURL, cfg.SecureCookies, cfg.Registration, cfg.SuperAdmins)
+	if cfg.MailFrom != "" {
+		srv.mailFrom = cfg.MailFrom
+	}
 
 	// Login is a credential check, so the default stays tight. A full browser
 	// suite from one IP needs TOCK_RATE_LIMIT_LOGIN raised, same as registration.

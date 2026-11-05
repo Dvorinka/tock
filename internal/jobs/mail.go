@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/smtp"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +35,9 @@ func EnqueueMailHTML(ctx context.Context, pool *pgxpool.Pool, to, subject, body,
 
 // MailHandler delivers queued mail payloads. An empty smtpAddr disables
 // delivery (mails vanish quietly, matching the old sendMail behavior).
-func MailHandler(smtpAddr, mailFrom string) Handler {
+// user/password enable SMTP AUTH; an empty user keeps the unauthenticated
+// Mailpit path. net/smtp speaks STARTTLS (port 587), not implicit TLS (465).
+func MailHandler(smtpAddr, mailFrom, user, password string) Handler {
 	return func(ctx context.Context, data json.RawMessage) error {
 		var p mailPayload
 		if err := json.Unmarshal(data, &p); err != nil {
@@ -51,6 +54,17 @@ func MailHandler(smtpAddr, mailFrom string) Handler {
 		}
 		msg := "From: " + mailFrom + "\r\nTo: " + p.To + "\r\nSubject: " + p.Subject +
 			"\r\nContent-Type: " + contentType + "; charset=utf-8\r\n\r\n" + body + "\r\n"
-		return smtp.SendMail(smtpAddr, nil, mailFrom, []string{p.To}, []byte(msg))
+		return smtp.SendMail(smtpAddr, smtpAuth(smtpAddr, user, password), mailFrom, []string{p.To}, []byte(msg))
 	}
+}
+
+func smtpAuth(addr, user, password string) smtp.Auth {
+	if user == "" {
+		return nil
+	}
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	return smtp.PlainAuth("", user, password, host)
 }
