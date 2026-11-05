@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -268,5 +269,95 @@ func TestProcessAcceptedInvitations(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM organization_invitations WHERE id = $1`, inv.ID).Scan(&cnt)
 	if cnt != 0 {
 		t.Fatal("invitation should be deleted")
+	}
+}
+
+func writeUserPhoto(t *testing.T, pool *pgxpool.Pool, dir string, userID pgtype.UUID) string {
+	t.Helper()
+	photoDir := filepath.Join(dir, "profile-photos")
+	if err := os.MkdirAll(photoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := uuid.UUID(userID.Bytes).String() + ".png"
+	abs := filepath.Join(photoDir, name)
+	if err := os.WriteFile(abs, []byte("img"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel := "profile-photos/" + name
+	if _, err := pool.Exec(context.Background(), `UPDATE users SET profile_photo_path = $2 WHERE id = $1`, userID, rel); err != nil {
+		t.Fatal(err)
+	}
+	return abs
+}
+
+func TestDeleteUserUnlinksProfilePhoto(t *testing.T) {
+	pool := testPool(t)
+	s := NewService(pool)
+	dir := t.TempDir()
+	s.SetStorageDir(dir)
+	id := newTestUser(t, pool, false)
+	photo := writeUserPhoto(t, pool, dir, id)
+	if err := s.DeleteUser(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(photo); !os.IsNotExist(err) {
+		t.Fatalf("photo remains after delete: %v", err)
+	}
+}
+
+func TestDeleteUserKeepsPhotoWhenRejected(t *testing.T) {
+	pool := testPool(t)
+	s := NewService(pool)
+	dir := t.TempDir()
+	s.SetStorageDir(dir)
+	ctx := context.Background()
+	owner := newTestUser(t, pool, false)
+	org, err := s.CreateOrganization(ctx, "Acme", owner, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := newTestUser(t, pool, false)
+	if _, err := s.AddMember(ctx, other, org.ID, RoleEmployee); err != nil {
+		t.Fatal(err)
+	}
+	photo := writeUserPhoto(t, pool, dir, owner)
+	if err := s.DeleteUser(ctx, owner); !errors.Is(err, ErrOwnerWithMultipleMembers) {
+		t.Fatalf("expected ErrOwnerWithMultipleMembers, got %v", err)
+	}
+	if _, err := os.Stat(photo); err != nil {
+		t.Fatalf("photo removed on rejected delete: %v", err)
+	}
+}
+
+func TestMakeMemberToPlaceholderKeepsRealUserPhoto(t *testing.T) {
+	pool := testPool(t)
+	s := NewService(pool)
+	dir := t.TempDir()
+	s.SetStorageDir(dir)
+	ctx := context.Background()
+	q := db.New(pool)
+	owner := newTestUser(t, pool, false)
+	org, err := s.CreateOrganization(ctx, "Acme", owner, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	regular := newTestUser(t, pool, false)
+	photo := writeUserPhoto(t, pool, dir, regular)
+	member, err := s.AddMember(ctx, regular, org.ID, RoleEmployee)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MakeMemberToPlaceholder(ctx, q, &member, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(photo); err != nil {
+		t.Fatalf("real user photo removed: %v", err)
+	}
+	var path *string
+	if err := pool.QueryRow(ctx, `SELECT profile_photo_path FROM users WHERE id = $1`, regular).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	if path == nil || *path == "" {
+		t.Fatal("real user lost profile_photo_path")
 	}
 }

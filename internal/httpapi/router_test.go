@@ -14,6 +14,17 @@ func testRouter() http.Handler {
 	return NewRouter(cfg, nil)
 }
 
+func TestHealthCheckUp(t *testing.T) {
+	rec := httptest.NewRecorder()
+	testRouter().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health-check/up", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "OK\n" {
+		t.Fatalf("body: %q", rec.Body.String())
+	}
+}
+
 func TestUsersMeRequiresAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testRouter().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil))

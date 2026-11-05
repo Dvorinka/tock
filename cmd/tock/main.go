@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,11 +14,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Dvorinka/tock/internal/cli"
 	"github.com/Dvorinka/tock/internal/config"
 	"github.com/Dvorinka/tock/internal/db"
 	"github.com/Dvorinka/tock/internal/httpapi"
+	"github.com/Dvorinka/tock/internal/importer"
 	"github.com/Dvorinka/tock/internal/jobs"
+	"github.com/Dvorinka/tock/internal/mcpserver"
 	"github.com/Dvorinka/tock/internal/seed"
+	"github.com/Dvorinka/tock/internal/tockapi"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var version = "dev"
@@ -38,14 +45,18 @@ func main() {
 		err = cmdSeed(os.Args[2:])
 	case "worker":
 		err = cmdWorker(os.Args[2:])
-	case "version":
+	case "timer", "entries", "projects", "clients", "reports":
+		err = cli.Run(os.Args[1:], os.Stdout, os.Stderr)
+	case "completion":
+		err = cli.Run(os.Args[1:], os.Stdout, os.Stderr)
+	case "mcp":
+		err = cmdMCP(os.Args[2:])
+	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "-h", "--help":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "tock: unknown command %q\n", os.Args[1])
-		usage()
-		os.Exit(2)
+		err = cli.Run(os.Args[1:], os.Stdout, os.Stderr)
 	}
 
 	if err != nil {
@@ -62,8 +73,28 @@ commands:
   migrate   apply database migrations and exit
   seed      insert demo data (OAuth clients, admin user, personal org)
   worker    run only the background job worker
-  version   print version
+  timer     inspect and control a running timer
+  entries   list and manage time entries
+  projects  list projects
+  clients   list clients
+  reports   list saved reports
+  mcp       run a PAT-authenticated MCP server over stdio
+  version   print version (--version, -v)
+  completion bash|zsh|fish  print shell completions
 `)
+}
+
+func cmdMCP(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("mcp does not accept arguments; configure TOCK_API_URL and TOCK_API_TOKEN")
+	}
+	client, err := tockapi.New("", "")
+	if err != nil {
+		return err
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	return mcpserver.NewServer(client).Run(ctx, &mcp.StdioTransport{})
 }
 
 // signalContext cancels on SIGINT/SIGTERM so all subcommands shut down cleanly.
@@ -93,13 +124,17 @@ func cmdServe(args []string) error {
 	}
 	defer pool.Close()
 
-	if err := db.Migrate(ctx, cfg.DatabaseDSN); err != nil {
-		return fmt.Errorf("migrate database: %w", err)
+	if cfg.AutoDBMigrate {
+		if err := db.Migrate(ctx, cfg.DatabaseDSN); err != nil {
+			return fmt.Errorf("migrate database: %w", err)
+		}
+	}
+	if err := seed.EnsureOAuthClients(ctx, pool, cfg.PersonalAccessClientID, cfg.PersonalAccessClientSecret); err != nil {
+		return fmt.Errorf("oauth clients: %w", err)
 	}
 
 	if !*noJobs {
-		worker := jobs.New(pool)
-		worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+		worker := newWorker(pool, cfg)
 		go func() {
 			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				cfg.Logger.Error("job worker stopped", "error", err)
@@ -125,6 +160,20 @@ func cmdServe(args []string) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+func newWorker(pool *pgxpool.Pool, cfg config.Config) *jobs.Worker {
+	worker := jobs.New(pool)
+	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, cfg.MailFrom, cfg.SMTPUser, cfg.SMTPPassword))
+	imports := importer.New(pool, cfg.StorageDir)
+	worker.Handle(importer.RunJobType, func(ctx context.Context, data json.RawMessage) error {
+		var payload importer.RunJobPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return fmt.Errorf("decode import job: %w", err)
+		}
+		return imports.ProcessRun(ctx, payload.ID)
+	})
+	return worker
 }
 
 func cmdMigrate(args []string) error {
@@ -180,8 +229,7 @@ func cmdWorker(args []string) error {
 	defer pool.Close()
 
 	cfg.Logger.Info("job worker started")
-	worker := jobs.New(pool)
-	worker.Handle(jobs.MailJobType, jobs.MailHandler(cfg.SMTPAddr, "tock@localhost"))
+	worker := newWorker(pool, cfg)
 	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("worker: %w", err)
 	}

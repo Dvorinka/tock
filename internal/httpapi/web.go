@@ -51,8 +51,10 @@ type Server struct {
 }
 
 func NewServer(pool *pgxpool.Pool, spa *spaHandler, sessions *auth.Store, oauth *oauth2.Server, appURL, appKey, smtpAddr, storageDir, gotenbergURL string, secure, registration bool, superAdmins []string) *Server {
+	dom := domain.NewService(pool)
+	dom.SetStorageDir(storageDir)
 	return &Server{pool: pool, spa: spa, sessions: sessions, oauth: oauth, superAdmins: superAdmins,
-		domain:   domain.NewService(pool),
+		domain:   dom,
 		importer: importer.New(pool, storageDir),
 		appURL:   appURL, appKey: appKey, smtpAddr: smtpAddr, storageDir: storageDir, mailFrom: "tock@localhost",
 		gotenbergURL:  gotenbergURL,
@@ -564,8 +566,8 @@ func (s *Server) signVerifyURL(userID string, email string, expires time.Time) s
 func (s *Server) verifySignedURL(r *http.Request) bool {
 	userID := chi.URLParam(r, "id")
 	hash := chi.URLParam(r, "hash")
-	expires, _ := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
-	if expires < time.Now().Unix() {
+	expires, err := strconv.ParseInt(r.URL.Query().Get("expires"), 10, 64)
+	if err != nil || expires <= time.Now().Unix() {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte("tock-verify"))

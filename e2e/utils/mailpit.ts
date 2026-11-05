@@ -34,8 +34,8 @@ export async function getInvitationAcceptUrl(
 ): Promise<string> {
     let searchResult: { messages: Array<{ ID: string }> } = { messages: [] };
 
-    // Retry up to 5 times with 500ms delay to allow for email delivery
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // The job worker shares one SMTP path with the whole suite. 10s covers a busy queue.
+    for (let attempt = 0; attempt < 20; attempt++) {
         searchResult = await searchEmails(
             request,
             `to:${encodeURIComponent(recipientEmail)} subject:"Organization Invitation"`
@@ -64,8 +64,8 @@ export async function getPasswordResetUrl(
 ): Promise<string> {
     let searchResult: { messages: Array<{ ID: string }> } = { messages: [] };
 
-    // Retry up to 5 times with 500ms delay to allow for email delivery
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // The job worker shares one SMTP path with the whole suite. 10s covers a busy queue.
+    for (let attempt = 0; attempt < 20; attempt++) {
         searchResult = await searchEmails(
             request,
             `to:${encodeURIComponent(recipientEmail)} subject:"Reset your password"`

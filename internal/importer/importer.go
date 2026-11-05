@@ -7,6 +7,7 @@ package importer
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,14 @@ type Report struct {
 	TimeEntriesCreated int
 	TagsCreated        int
 	UsersCreated       int
+}
+
+// RunJobType identifies queued asynchronous imports.
+const RunJobType = "import.run"
+
+// RunJobPayload identifies the durable run row processed by a worker.
+type RunJobPayload struct {
+	ID string `json:"id"`
 }
 
 // Map renders the upstream JSON shape.
@@ -57,16 +66,16 @@ func New(pool *pgxpool.Pool, storageDir string) *Service {
 // ImporterKeys returns the known importer type keys.
 func ImporterKeys() map[string]bool {
 	return map[string]bool{
-		"toggl_time_entries":     true,
-		"toggl_data_importer":    true,
-		"clockify_time_entries":  true,
-		"clockify_projects":      true,
-		"solidtime":              true,
-		"harvest_projects":       true,
-		"harvest_time_entries":   true,
-		"harvest_clients":        true,
-		"generic_projects":       true,
-		"generic_time_entries":   true,
+		"toggl_time_entries":    true,
+		"toggl_data_importer":   true,
+		"clockify_time_entries": true,
+		"clockify_projects":     true,
+		"solidtime":             true,
+		"harvest_projects":      true,
+		"harvest_time_entries":  true,
+		"harvest_clients":       true,
+		"generic_projects":      true,
+		"generic_time_entries":  true,
 	}
 }
 
@@ -74,6 +83,10 @@ func ImporterKeys() map[string]bool {
 // import is one transaction: any ImportException (or unexpected error) rolls
 // back, matching upstream semantics.
 func (s *Service) Import(ctx context.Context, org db.Organization, importerType string, data []byte, timezone string) (Report, error) {
+	return s.importData(ctx, org, importerType, data, timezone, nil)
+}
+
+func (s *Service) importData(ctx context.Context, org db.Organization, importerType string, data []byte, timezone string, runID *pgtype.UUID) (Report, error) {
 	if s.storageDir != "" {
 		name := fmt.Sprintf("%s-%s-%s", time.Now().Format("2006-01-02"), uuidStr(org.ID), uuid.Must(uuid.NewV7()).String())
 		dir := filepath.Join(s.storageDir, "import")
@@ -94,7 +107,16 @@ func (s *Service) Import(ctx context.Context, org db.Organization, importerType 
 		return Report{}, fmt.Errorf("import lock: %w", err)
 	}
 	if !locked {
-		return Report{}, &Error{msg: "Import is already in progress"}
+		return Report{}, &Error{msg: "Import is already in progress", retryable: true}
+	}
+	if runID != nil {
+		run, err := q.GetImportRunForProcessing(ctx, *runID)
+		if err != nil {
+			return Report{}, fmt.Errorf("reload import run: %w", err)
+		}
+		if run.Status == "completed" || run.Status == "failed" {
+			return Report{}, nil
+		}
 	}
 
 	b := newBase(ctx, q, org)
@@ -130,17 +152,61 @@ func (s *Service) Import(ctx context.Context, org db.Organization, importerType 
 		return Report{}, &Error{msg: "Unknown error"}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return Report{}, fmt.Errorf("commit import: %w", err)
-	}
-	return Report{
+	report := Report{
 		ClientsCreated:     b.clients.created,
 		ProjectsCreated:    b.projects.created,
 		TasksCreated:       b.tasks.created,
 		TimeEntriesCreated: b.timeEntriesCreated,
 		TagsCreated:        b.tags.created,
 		UsersCreated:       b.users.created,
-	}, nil
+	}
+	if runID != nil {
+		// Keep run completion atomic with imported rows so a worker retry cannot duplicate entries.
+		raw, err := json.Marshal(report.Map())
+		if err != nil {
+			return Report{}, fmt.Errorf("encode import report: %w", err)
+		}
+		if err := q.CompleteImportRun(ctx, db.CompleteImportRunParams{ID: *runID, Report: raw}); err != nil {
+			return Report{}, fmt.Errorf("complete import run: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Report{}, fmt.Errorf("commit import: %w", err)
+	}
+	return report, nil
+}
+
+// ProcessRun executes a persisted import and records user-facing failures.
+func (s *Service) ProcessRun(ctx context.Context, runID string) error {
+	id, err := uuid.Parse(runID)
+	if err != nil {
+		return fmt.Errorf("parse import run id: %w", err)
+	}
+	runUUID := pgtype.UUID{Bytes: id, Valid: true}
+	q := db.New(s.pool)
+	run, err := q.GetImportRunForProcessing(ctx, runUUID)
+	if err != nil {
+		return fmt.Errorf("load import run: %w", err)
+	}
+	if run.Status == "completed" || run.Status == "failed" {
+		return nil
+	}
+	if err := q.MarkImportRunProcessing(ctx, runUUID); err != nil {
+		return fmt.Errorf("mark import run processing: %w", err)
+	}
+	_, err = s.importData(ctx, db.Organization{ID: run.OrganizationID}, run.ImporterType, run.Data, run.Timezone, &runUUID)
+	if err != nil {
+		var importErr *Error
+		if !errors.As(err, &importErr) || importErr.retryable {
+			return err
+		}
+		message := importErr.Error()
+		if updateErr := q.FailImportRun(ctx, db.FailImportRunParams{ID: runUUID, Error: &message}); updateErr != nil {
+			return fmt.Errorf("record import failure: %w (import error: %v)", updateErr, err)
+		}
+		return nil
+	}
+	return nil
 }
 
 // readCSV parses a full CSV document (league/csv with header offset 0,

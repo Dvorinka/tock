@@ -283,6 +283,13 @@ export function useEventResize(params: {
         document.removeEventListener('pointerup', onResizePointerUp);
         document.body.classList.remove('fc-resizing-active');
 
+        // Pointer up can land in a different day column without a final
+        // pointermove event. Resolve the destination from the terminal event
+        // itself so cross-day updates use the column where the user released.
+        const dayStr = params.getDayFromClientX(e.clientX);
+        if (dayStr) resizeCurrentDay.value = dayStr;
+        lastResizeClientY.value = e.clientY;
+
         const times = computeResizedTimes(e.clientY);
         isResizing.value = false;
 

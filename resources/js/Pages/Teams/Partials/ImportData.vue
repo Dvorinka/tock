@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PrimaryButton from '@/packages/ui/src/Buttons/PrimaryButton.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useNotificationsStore } from '@/utils/notification';
 import { api } from '@/packages/api/src';
 import { Field, FieldLabel } from '@/packages/ui/src/field';
@@ -13,7 +13,7 @@ import {
 import { canUseBillableRates } from '@/utils/billing';
 
 import { getCurrentOrganizationId } from '@/utils/useUser';
-import type { ImportReport, ImportType } from '@/packages/api/src';
+import type { ImportReport, ImportRunStatus, ImportType } from '@/packages/api/src';
 import DialogModal from '@/packages/ui/src/DialogModal.vue';
 import SecondaryButton from '@/packages/ui/src/Buttons/SecondaryButton.vue';
 import { initializeStores } from '@/utils/init';
@@ -23,6 +23,7 @@ import Card from '@/Components/Common/Card.vue';
 const importTypeOptions = ref<ImportType[]>([]);
 
 const { addNotification } = useNotificationsStore();
+let componentActive = true;
 
 const loading = ref(false);
 
@@ -41,7 +42,12 @@ onMounted(async () => {
     }
 });
 
+onUnmounted(() => {
+    componentActive = false;
+});
+
 const reportResult = ref<ImportReport | null>();
+const importStatus = ref<ImportRunStatus['status'] | null>(null);
 const files = ref<FileList | null>(null);
 
 async function importData() {
@@ -49,6 +55,7 @@ async function importData() {
         addNotification('error', 'Please select the import type');
         return;
     }
+    const selectedImporter = importType.value;
     if (files.value?.length !== 1) {
         addNotification('error', 'Please select the CSV or ZIP file that you want to import');
         return;
@@ -60,30 +67,55 @@ async function importData() {
         const { handleApiRequestNotifications } = useNotificationsStore();
         loading.value = true;
         try {
-            reportResult.value = await handleApiRequestNotifications(() => {
-                if (importType.value) {
-                    return api.importData(
-                        {
-                            type: importType.value.key,
-                            data: base64String,
-                        },
-                        {
-                            params: {
-                                organization: organizationId,
-                            },
-                        }
+            const submitted = await handleApiRequestNotifications(() =>
+                api.importData(
+                    {
+                        type: selectedImporter.key,
+                        data: base64String,
+                        async: true,
+                    },
+                    { params: { organization: organizationId } }
+                )
+            );
+            if ('report' in submitted) {
+                reportResult.value = submitted;
+            } else {
+                importStatus.value = submitted.status;
+                while (componentActive) {
+                    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+                    if (!componentActive) {
+                        return;
+                    }
+                    const run = await handleApiRequestNotifications(() =>
+                        api.getImportRun({
+                            params: { organization: organizationId, importRun: submitted.id },
+                        })
                     );
+                    importStatus.value = run.data.status;
+                    if (run.data.status === 'failed') {
+                        addNotification(
+                            'error',
+                            'Import failed',
+                            run.data.error ?? 'Please try again or contact support.'
+                        );
+                        throw new Error(run.data.error ?? 'Import failed. Please try again.');
+                    }
+                    if (run.data.status === 'completed' && run.data.report) {
+                        reportResult.value = { report: run.data.report };
+                        break;
+                    }
                 }
-                return new Promise((resolve, reject) => {
-                    reject('Import type is null');
-                });
-            });
+                if (!componentActive) {
+                    return;
+                }
+            }
             initializeStores();
             if (reportResult.value) {
                 showResultModal.value = true;
             }
         } finally {
             loading.value = false;
+            importStatus.value = null;
         }
     }
 }
@@ -163,8 +195,8 @@ const showResultModal = ref(false);
                 <InformationCircleIcon class="h-5 min-w-0 w-5 text-bg-tertiary" />
                 <p class="flex-1">
                     Import existing data from Toggl, Clockify, Harvest, generic CSV files or a
-                    different tock instance. Please select the type of data you want to import
-                    and follow the instructions.
+                    different tock instance. Please select the type of data you want to import and
+                    follow the instructions.
                 </p>
             </div>
             <div
@@ -176,6 +208,17 @@ const showResultModal = ref(false);
                     available in the free plan. All projects and time entries will be imported as
                     non-billable.
                 </p>
+            </div>
+            <div
+                v-if="loading"
+                class="py-2 px-3 sm:px-4 text-sm border-t border-card-background-separator text-text-secondary"
+                role="status"
+                aria-live="polite">
+                {{
+                    importStatus === 'processing'
+                        ? 'Import in progress…'
+                        : 'Import queued. Waiting for a worker…'
+                }}
             </div>
         </Card>
 

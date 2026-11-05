@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { request as playwrightRequest, expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { PLAYWRIGHT_BASE_URL } from '../../playwright/config';
 
@@ -78,7 +78,9 @@ function bearerHeaders(token: string): Record<string, string> {
 
 export async function setupTestContext(page: Page): Promise<TestContext> {
     const token = await createApiToken(page);
-    const request = page.request;
+    // Node-side context — page.request routes through the browser's socket
+    // pool and starves on mass-create Promise.all bursts.
+    const request = await playwrightRequest.newContext();
     const headers = bearerHeaders(token);
 
     const orgId = await getOrganizationId(request, headers);

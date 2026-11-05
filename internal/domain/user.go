@@ -12,7 +12,8 @@ import (
 // 400; owner memberships delete their organization, other memberships turn into
 // placeholders; OAuth tokens/codes go before the user row.
 func (s *Service) DeleteUser(ctx context.Context, userID pgtype.UUID) error {
-	return s.withTx(ctx, func(q *db.Queries) error {
+	ctx, reap := withReaper(ctx)
+	err := s.withTx(ctx, func(q *db.Queries) error {
 		memberships, err := q.ListUserMemberships(ctx, userID)
 		if err != nil {
 			return err
@@ -50,11 +51,13 @@ func (s *Service) DeleteUser(ctx context.Context, userID pgtype.UUID) error {
 		if err := q.DeleteAuthCodesForUser(ctx, userID); err != nil {
 			return err
 		}
-		// shortcut: profile photo file deletion — upstream removes it from the
-		// storage disk; tock has no storage layer yet (Phase 6/7). The row dies
-		// with the user, so only the file itself may linger.
-		return q.DeleteUserByID(ctx, userID)
+		return s.deleteUserRow(ctx, q, userID)
 	})
+	if err != nil {
+		return err
+	}
+	s.reap(reap)
+	return nil
 }
 
 // deleteOrganizationQ is DeleteOrganization's body for callers already inside
@@ -91,7 +94,7 @@ func (s *Service) deleteOrganizationQ(ctx context.Context, q *db.Queries, orgID,
 			continue
 		}
 		if m.IsPlaceholder {
-			if err := q.DeleteUserByID(ctx, m.UserID); err != nil {
+			if err := s.deleteUserRow(ctx, q, m.UserID); err != nil {
 				return err
 			}
 			continue

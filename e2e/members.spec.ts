@@ -795,6 +795,9 @@ test('test that sorting members by name, role, and status works', async ({ page,
 
     const table = page.getByTestId('member_table');
     await expect(table).toBeVisible();
+    // The table shell is visible before the imported rows land.
+    await expect(table.getByText('AAA SortFirst', { exact: true })).toBeVisible();
+    await expect(table.getByText('ZZZ SortLast', { exact: true })).toBeVisible();
 
     // -- Name sorting (default is already name asc after clearing state) --
     const nameHeader = table.getByText('Name').first();

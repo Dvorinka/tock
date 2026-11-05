@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +33,31 @@ const (
 	refreshTokenTTL = 365 * 24 * time.Hour
 	authCodeTTL     = 10 * time.Minute
 )
+
+// ScopeDescriptions mirrors the scopes exposed by the upstream Passport
+// authorization server.
+type ScopeDescription struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+func ScopeDescriptions() []ScopeDescription {
+	return []ScopeDescription{
+		{ID: "create", Description: "Create resources"},
+		{ID: "read", Description: "Read Resources"},
+		{ID: "update", Description: "Update Resources"},
+		{ID: "delete", Description: "Delete Resources"},
+	}
+}
+
+func isKnownScope(id string) bool {
+	for _, scope := range ScopeDescriptions() {
+		if scope.ID == id {
+			return true
+		}
+	}
+	return false
+}
 
 type Server struct {
 	pool *pgxpool.Pool
@@ -120,9 +144,9 @@ func (s *Server) issueToken(ctx context.Context, userID, clientID string, name *
 	return signed, refreshID, nil
 }
 
-// IssuePersonalAccessToken ports Passport's createToken for the personal
-// access client: scopes are ['*'], the token has no expiry and there is no
-// refresh token. Returns the token ID and the bearer string.
+// IssuePersonalAccessToken ports the upstream API-token endpoint: it grants
+// all API scopes, expires after one year, and has no refresh token. Returns
+// the token ID and the bearer string.
 func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name string) (string, string, error) {
 	var clientID string
 	if err := s.pool.QueryRow(ctx,
@@ -137,10 +161,10 @@ func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name stri
 		"jti":    jti,
 		"iat":    now.Unix(),
 		"nbf":    now.Unix(),
+		"exp":    now.Add(accessTokenTTL).Unix(),
 		"sub":    userID,
 		"scopes": []string{"*"},
 	}
-	// No exp claim: personal access tokens do not expire, matching Passport.
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = s.kid
 	signed, err := tok.SignedString(s.priv)
@@ -150,18 +174,18 @@ func (s *Server) IssuePersonalAccessToken(ctx context.Context, userID, name stri
 	scopesJSON, _ := json.Marshal([]string{"*"})
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_access_tokens (id, user_id, client_id, name, scopes, revoked, created_at, updated_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, false, now(), now(), NULL)`,
-		jti, userID, clientID, name, string(scopesJSON)); err != nil {
+		VALUES ($1, $2, $3, $4, $5, false, now(), now(), $6)`,
+		jti, userID, clientID, name, string(scopesJSON), now.Add(accessTokenTTL)); err != nil {
 		return "", "", fmt.Errorf("insert access token: %w", err)
 	}
 	return jti, signed, nil
 }
 
 // AuthenticateAPI validates a Bearer JWT and returns the owning user ID.
-func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
+func (s *Server) AuthenticateAPI(r *http.Request) (string, []string, error) {
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") {
-		return "", errors.New("no bearer token")
+		return "", nil, errors.New("no bearer token")
 	}
 	token, err := jwt.Parse(strings.TrimPrefix(h, "Bearer "), func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
@@ -170,27 +194,52 @@ func (s *Server) AuthenticateAPI(r *http.Request) (string, error) {
 		return s.pub, nil
 	})
 	if err != nil || !token.Valid {
-		return "", errors.New("invalid token")
+		return "", nil, errors.New("invalid token")
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", errors.New("invalid claims")
+		return "", nil, errors.New("invalid claims")
 	}
 	jti, _ := claims["jti"].(string)
 	sub, _ := claims["sub"].(string)
+	scopes := claimScopes(claims["scopes"])
 	var revoked bool
 	var expiresAt pgtype.Timestamp
 	err = s.pool.QueryRow(r.Context(),
 		`SELECT revoked, expires_at FROM oauth_access_tokens WHERE id = $1`, jti).Scan(&revoked, &expiresAt)
 	if err != nil || revoked {
-		return "", errors.New("token revoked or expired")
+		return "", nil, errors.New("token revoked or expired")
 	}
-	// Personal access tokens carry no expiry (Passport only sets one for
-	// OAuth-issued tokens), so a NULL expires_at never expires.
+	// Older personal access tokens can have a NULL expires_at; preserve those
+	// legacy tokens while enforcing expiry for newly issued tokens.
 	if expiresAt.Valid && time.Now().After(expiresAt.Time) {
-		return "", errors.New("token revoked or expired")
+		return "", nil, errors.New("token revoked or expired")
 	}
-	return sub, nil
+	return sub, scopes, nil
+}
+
+func claimScopes(claim any) []string {
+	values, ok := claim.([]any)
+	if !ok {
+		return nil
+	}
+	scopes := make([]string, 0, len(values))
+	for _, value := range values {
+		if scope, ok := value.(string); ok {
+			scopes = append(scopes, scope)
+		}
+	}
+	return scopes
+}
+
+// ScopeAllows reports whether a bearer token carries the required API scope.
+func ScopeAllows(scopes []string, required string) bool {
+	for _, scope := range scopes {
+		if scope == "*" || scope == required {
+			return true
+		}
+	}
+	return false
 }
 
 func writeOAuthError(w http.ResponseWriter, status int, errName, hint string) {
@@ -220,32 +269,23 @@ func (s *Server) HandleToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) grantAuthCode(w http.ResponseWriter, r *http.Request) {
 	code := r.Form.Get("code")
 	var userID, clientID string
-	var scopes *string
+	var scopes, challenge, method *string
 	var expiresAt time.Time
 	err := s.pool.QueryRow(r.Context(), `
 		DELETE FROM oauth_auth_codes WHERE id = $1 AND revoked = false AND expires_at > now()
-		RETURNING user_id, client_id, scopes, expires_at`, code).
-		Scan(&userID, &clientID, &scopes, &expiresAt)
+		RETURNING user_id, client_id, scopes, expires_at, code_challenge, code_challenge_method`, code).
+		Scan(&userID, &clientID, &scopes, &expiresAt, &challenge, &method)
 	if err != nil {
 		writeOAuthError(w, 400, "invalid_grant", "authorization code invalid or expired")
 		return
 	}
-	// PKCE: auth code id encodes the challenge — stored alongside via session on issue.
-	if meta, ok := pendingCodes.Load(code); ok {
-		m := meta.(codeMeta)
-		if r.Form.Get("client_id") != m.clientID {
-			writeOAuthError(w, 400, "invalid_grant", "client mismatch")
-			return
-		}
-		if m.challenge != "" {
-			v := r.Form.Get("code_verifier")
-			sum := sha256.Sum256([]byte(v))
-			if base64.RawURLEncoding.EncodeToString(sum[:]) != m.challenge && v != m.challenge {
-				writeOAuthError(w, 400, "invalid_grant", "PKCE verification failed")
-				return
-			}
-		}
-		pendingCodes.Delete(code)
+	if r.Form.Get("client_id") != clientID {
+		writeOAuthError(w, 400, "invalid_grant", "client mismatch")
+		return
+	}
+	if !pkceMatches(deref(method), deref(challenge), r.Form.Get("code_verifier")) {
+		writeOAuthError(w, 400, "invalid_grant", "PKCE verification failed")
+		return
 	}
 	access, refresh, err := s.issueToken(r.Context(), userID, clientID, nil, parseScopes(scopes))
 	if err != nil {
@@ -304,15 +344,6 @@ func parseScopes(raw *string) []string {
 	return strings.Fields(*raw)
 }
 
-type codeMeta struct {
-	clientID  string
-	challenge string
-}
-
-// shortcut: PKCE challenge for an issued code lives in-process. Upgrade to a
-// column on oauth_auth_codes if multi-replica deployments need the exchange.
-var pendingCodes sync.Map
-
 // Authorize GET validates the request and either auto-approves or renders consent.
 // Render is supplied by the caller (html page or redirect).
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request,
@@ -340,27 +371,88 @@ func (s *Server) Authorize(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	scopes := strings.Fields(q.Get("scope"))
+	challenge := q.Get("code_challenge")
+	method := q.Get("code_challenge_method")
 	authReq := map[string]any{
 		"client_id": client.id, "redirect_uri": redirectURI, "state": q.Get("state"),
-		"scopes": scopes, "code_challenge": q.Get("code_challenge"),
+		"scopes": scopes, "code_challenge": challenge, "code_challenge_method": method,
 	}
 	sess.Set("authRequest", authReq)
 	sess.Set("authToken", auth.RandomToken(20))
 	if userHasGranted(r.Context(), s.pool, user.ID, client.id, scopes) {
-		s.approve(w, r, user.ID, client.id, redirectURI, q.Get("state"), q.Get("code_challenge"), scopes)
+		s.approve(w, r, user.ID, client.id, redirectURI, q.Get("state"), challenge, method, scopes)
 		return
 	}
 	renderConsent(w, r, client.id, client.name, scopes)
 }
 
-func userHasGranted(ctx context.Context, pool *pgxpool.Pool, userID, clientID string, scopes []string) bool {
-	var count int
-	_ = pool.QueryRow(ctx, `
-		SELECT count(*) FROM oauth_access_tokens
-		WHERE user_id = $1 AND client_id = $2 AND revoked = false`, userID, clientID).Scan(&count)
-	// shortcut: auto-approve when any prior token exists; scope diff check is
-	// upgrade-if-needed once scoped clients ship (upstream: hasGrantedScopes).
-	return count > 0
+func userHasGranted(ctx context.Context, pool *pgxpool.Pool, userID, clientID string, requested []string) bool {
+	rows, err := pool.Query(ctx, `
+		SELECT scopes FROM oauth_access_tokens
+		WHERE user_id = $1 AND client_id = $2 AND revoked = false AND expires_at > now()`,
+		userID, clientID)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw *string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		if scopesCover(parseScopes(raw), requested) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopesCover reports whether granted already includes every requested scope.
+// An empty request needs no extra consent. "*" covers every scope.
+func scopesCover(granted, requested []string) bool {
+	if len(requested) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(granted))
+	for _, scope := range granted {
+		if scope == "*" {
+			return true
+		}
+		have[scope] = struct{}{}
+	}
+	for _, scope := range requested {
+		if _, ok := have[scope]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func deref(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+// pkceMatches checks a verifier against the challenge stored with the auth code.
+// An empty challenge means the client did not use PKCE. An omitted method keeps
+// the previous acceptance of both S256 and plain, so existing desktop clients
+// keep pairing.
+func pkceMatches(method, challenge, verifier string) bool {
+	if challenge == "" {
+		return true
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	hashed := base64.RawURLEncoding.EncodeToString(sum[:])
+	switch method {
+	case "S256":
+		return hashed == challenge
+	case "plain":
+		return verifier == challenge && verifier != ""
+	default:
+		return hashed == challenge || (verifier != "" && verifier == challenge)
+	}
 }
 
 // ApprovePost handles POST /oauth/authorize (consent form submit).
@@ -386,7 +478,7 @@ func (s *Server) ApprovePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authorization request expired", http.StatusBadRequest)
 		return
 	}
-	s.approve(w, r, user.ID, req.clientID, req.redirectURI, req.state, req.challenge, req.scopes)
+	s.approve(w, r, user.ID, req.clientID, req.redirectURI, req.state, req.challenge, req.method, req.scopes)
 }
 
 // DenyPost handles DELETE /oauth/authorize.
@@ -415,8 +507,8 @@ func (s *Server) DenyPost(w http.ResponseWriter, r *http.Request) {
 }
 
 type authReqData struct {
-	clientID, redirectURI, state, challenge string
-	scopes                                []string
+	clientID, redirectURI, state, challenge, method string
+	scopes                                          []string
 }
 
 func decodeAuthRequest(m map[string]any) (authReqData, error) {
@@ -428,6 +520,7 @@ func decodeAuthRequest(m map[string]any) (authReqData, error) {
 	d.redirectURI, _ = m["redirect_uri"].(string)
 	d.state, _ = m["state"].(string)
 	d.challenge, _ = m["code_challenge"].(string)
+	d.method, _ = m["code_challenge_method"].(string)
 	if ss, ok := m["scopes"].([]any); ok {
 		for _, s := range ss {
 			if str, ok := s.(string); ok {
@@ -442,17 +535,23 @@ func decodeAuthRequest(m map[string]any) (authReqData, error) {
 }
 
 func (s *Server) approve(w http.ResponseWriter, r *http.Request,
-	userID, clientID, redirectURI, state, challenge string, scopes []string) {
+	userID, clientID, redirectURI, state, challenge, method string, scopes []string) {
 	code := auth.RandomID(40)
 	scopesJSON, _ := json.Marshal(scopes)
+	var challengeArg, methodArg any
+	if challenge != "" {
+		challengeArg = challenge
+		if method != "" {
+			methodArg = method
+		}
+	}
 	if _, err := s.pool.Exec(r.Context(), `
-		INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at)
-		VALUES ($1, $2, $3, $4, false, $5)`,
-		code, userID, clientID, string(scopesJSON), time.Now().Add(authCodeTTL)); err != nil {
+		INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method)
+		VALUES ($1, $2, $3, $4, false, $5, $6, $7)`,
+		code, userID, clientID, string(scopesJSON), time.Now().Add(authCodeTTL), challengeArg, methodArg); err != nil {
 		writeOAuthError(w, 500, "server_error", err.Error())
 		return
 	}
-	pendingCodes.Store(code, codeMeta{clientID: clientID, challenge: challenge})
 	u, _ := url.Parse(redirectURI)
 	q := u.Query()
 	q.Set("code", code)
@@ -563,6 +662,15 @@ func (s *Server) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reques
 		Scopes []string `json:"scopes"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if len(body.Scopes) == 0 {
+		body.Scopes = []string{"*"}
+	}
+	for _, scope := range body.Scopes {
+		if scope != "*" && !isKnownScope(scope) {
+			writeOAuthError(w, http.StatusUnprocessableEntity, "invalid_scope", "scope is not supported")
+			return
+		}
+	}
 	access, _, err := s.issueToken(r.Context(), user.ID, clientID, &body.Name, body.Scopes)
 	if err != nil {
 		writeOAuthError(w, 500, "server_error", err.Error())

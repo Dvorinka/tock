@@ -16,6 +16,7 @@ type Querier interface {
 	ClearCurrentTeamForOrg(ctx context.Context, currentTeamID pgtype.UUID) error
 	ClearUserCurrentTeam(ctx context.Context, id pgtype.UUID) error
 	ClientHasProjects(ctx context.Context, clientID pgtype.UUID) (bool, error)
+	CompleteImportRun(ctx context.Context, arg CompleteImportRunParams) error
 	ConfirmPendingEmail(ctx context.Context, id pgtype.UUID) error
 	ConsumeAuthCode(ctx context.Context, id string) (OauthAuthCode, error)
 	CountAudits(ctx context.Context, arg CountAuditsParams) (int64, error)
@@ -32,6 +33,7 @@ type Querier interface {
 	CountTags(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	CountUserMemberships(ctx context.Context, userID pgtype.UUID) (int64, error)
+	CreateImportRun(ctx context.Context, arg CreateImportRunParams) (pgtype.UUID, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (OrganizationInvitation, error)
 	CreateMember(ctx context.Context, arg CreateMemberParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
@@ -80,11 +82,14 @@ type Querier interface {
 	// loadDescriptorsMap per type is resolved in Go (per-table lookups); these
 	// four cover client/user/project/task/tag.
 	DescriptorNamesForIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]DescriptorNamesForIDsRow, error)
+	FailImportRun(ctx context.Context, arg FailImportRunParams) error
 	FirstUserOrganization(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	GetAccessToken(ctx context.Context, id string) (OauthAccessToken, error)
 	GetAudit(ctx context.Context, id int64) (GetAuditRow, error)
 	GetClientByID(ctx context.Context, id pgtype.UUID) (Client, error)
 	GetGoalByID(ctx context.Context, id pgtype.UUID) (GetGoalByIDRow, error)
+	GetImportRun(ctx context.Context, arg GetImportRunParams) (GetImportRunRow, error)
+	GetImportRunForProcessing(ctx context.Context, id pgtype.UUID) (GetImportRunForProcessingRow, error)
 	GetInvitation(ctx context.Context, id pgtype.UUID) (OrganizationInvitation, error)
 	GetInvoice(ctx context.Context, id pgtype.UUID) (GetInvoiceRow, error)
 	GetInvoiceRecipient(ctx context.Context, id pgtype.UUID) (GetInvoiceRecipientRow, error)
@@ -170,6 +175,7 @@ type Querier interface {
 	ListTasksPaginated(ctx context.Context, arg ListTasksPaginatedParams) ([]Task, error)
 	// User deletion (DeletionService::deleteUser) -------------------------------
 	ListUserMemberships(ctx context.Context, userID pgtype.UUID) ([]ListUserMembershipsRow, error)
+	MarkImportRunProcessing(ctx context.Context, id pgtype.UUID) error
 	MarkInvitationAccepted(ctx context.Context, id pgtype.UUID) error
 	// BillableRateService::getBillableRateForTimeEntry precedence:
 	// project_member > project > member > organization
@@ -215,6 +221,8 @@ type Querier interface {
 	TimeEntriesExistForMemberUser(ctx context.Context, arg TimeEntriesExistForMemberUserParams) (bool, error)
 	// getDailyTrackedHours / getWeeklyHistory: per-date sums in user tz
 	TimeEntriesForChartAggregate(ctx context.Context, arg TimeEntriesForChartAggregateParams) ([]TimeEntriesForChartAggregateRow, error)
+	// Durations clip at the period bounds so entries spanning the boundary are
+	// counted by overlap (matches the Last-7-Days window query, issue #208).
 	TimeEntriesSumBetween(ctx context.Context, arg TimeEntriesSumBetweenParams) (int64, error)
 	TimeEntryExistsWithTag(ctx context.Context, arg TimeEntryExistsWithTagParams) (bool, error)
 	TryImportLock(ctx context.Context, hashtext string) (bool, error)

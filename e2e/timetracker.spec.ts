@@ -527,11 +527,9 @@ test.describe('Project Task Dropdown', () => {
         // Seed enough projects that the target sits outside the initially rendered window.
         const seed = Math.floor(Math.random() * 100000);
         const prefix = `VirtProj ${seed} `;
-        await Promise.all(
-            Array.from({ length: 30 }, (_, i) =>
-                createProjectViaApi(ctx, { name: prefix + String(i).padStart(2, '0') })
-            )
-        );
+        for (let i = 0; i < 30; i++) {
+            await createProjectViaApi(ctx, { name: prefix + String(i).padStart(2, '0') });
+        }
         const target = prefix + '27';
 
         await goToDashboard(page);

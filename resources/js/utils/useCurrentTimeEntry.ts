@@ -85,8 +85,13 @@ export const useCurrentTimeEntryStore = defineStore('currentTimeEntry', () => {
     async function fetchCurrentTimeEntry() {
         const organizationId = getCurrentOrganizationId();
         if (organizationId) {
+            const requestedEntryId = currentTimeEntry.value.id;
             try {
                 const timeEntriesResponse = await api.getMyActiveTimeEntry({});
+                // A start/stop action can change the entry while this request is
+                // in flight. Ignore its stale response so an earlier 404 cannot
+                // clear a timer that has just started.
+                if (currentTimeEntry.value.id !== requestedEntryId) return;
                 if (timeEntriesResponse?.data) {
                     currentTimeEntry.value = timeEntriesResponse.data;
                 } else if (currentTimeEntry.value.id !== '') {
@@ -99,7 +104,10 @@ export const useCurrentTimeEntryStore = defineStore('currentTimeEntry', () => {
                 // API error (e.g., 404 when no active time entry)
                 // Only reset if we had a previously started timer (has an ID)
                 // Don't reset if user is preparing a new time entry (no ID yet)
-                if (currentTimeEntry.value.id !== '') {
+                if (
+                    currentTimeEntry.value.id === requestedEntryId &&
+                    currentTimeEntry.value.id !== ''
+                ) {
                     currentTimeEntry.value = { ...emptyTimeEntry };
                 }
             }

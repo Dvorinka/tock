@@ -180,13 +180,13 @@ func (b *base) importClockifyTimeEntries(ctx context.Context, data []byte, timez
 		if err := b.insertTimeEntry(ctx, timeEntryCreate{
 			UserID: userID, MemberID: memberID, TaskID: taskID,
 			ProjectID: projectID, ClientID: clientID,
-			Description: rec["Description"],
-			Billable:    billable,
+			Description:  rec["Description"],
+			Billable:     billable,
 			BillableRate: b.billableRate(billable, projectMember, project, member),
-			Tags:        tagIDs,
-			Type:        entryType,
-			Start:       start,
-			End:         end,
+			Tags:         tagIDs,
+			Type:         entryType,
+			Start:        start,
+			End:          end,
 		}); err != nil {
 			return err
 		}
@@ -276,4 +276,3 @@ func (b *base) importClockifyProjects(ctx context.Context, data []byte) error {
 	}
 	return nil
 }
-

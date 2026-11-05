@@ -97,12 +97,12 @@ func (b *base) importHarvestTimeEntries(ctx context.Context, data []byte, timezo
 		if err := b.insertTimeEntry(ctx, timeEntryCreate{
 			UserID: userID, MemberID: memberID, TaskID: taskID,
 			ProjectID: projectID, ClientID: clientID,
-			Description: rec["Notes"],
-			Billable:    billable,
+			Description:  rec["Notes"],
+			Billable:     billable,
 			BillableRate: b.billableRate(billable, projectMember, project, member),
-			Tags:        nil,
-			Start:       start,
-			End:         end,
+			Tags:         nil,
+			Start:        start,
+			End:          end,
 		}); err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 // mergePlaceholderMembersIntoExistingMember. Runs in a transaction.
 func (s *Service) AddMember(ctx context.Context, userID, orgID pgtype.UUID, role string) (db.Member, error) {
 	var member db.Member
+	ctx, reap := withReaper(ctx)
 	err := s.withTx(ctx, func(q *db.Queries) error {
 		member = db.Member{ID: newUUID(), UserID: userID, OrganizationID: orgID, Role: ptr(role)}
 		if err := q.CreateMember(ctx, db.CreateMemberParams{
@@ -25,7 +26,11 @@ func (s *Service) AddMember(ctx context.Context, userID, orgID pgtype.UUID, role
 		}
 		return s.mergePlaceholderMembersIntoMember(ctx, q, member, orgID, userID)
 	})
-	return member, err
+	if err != nil {
+		return member, err
+	}
+	s.reap(reap)
+	return member, nil
 }
 
 // mergePlaceholderMembersIntoMember ports MemberService::
@@ -54,7 +59,7 @@ func (s *Service) mergePlaceholderMembersIntoMember(ctx context.Context, q *db.Q
 		if err := q.DeleteMember(ctx, p.MemberID); err != nil {
 			return err
 		}
-		if err := q.DeleteUserByID(ctx, p.UserID); err != nil {
+		if err := s.deleteUserRow(ctx, q, p.UserID); err != nil {
 			return err
 		}
 	}
@@ -179,7 +184,8 @@ func (s *Service) RemoveMember(ctx context.Context, member db.Member, isPlacehol
 		return ErrCanNotRemoveOwner
 	}
 	orgID := member.OrganizationID
-	return s.withTx(ctx, func(q *db.Queries) error {
+	ctx, reap := withReaper(ctx)
+	err := s.withTx(ctx, func(q *db.Queries) error {
 		userName, userCurrent, err := s.userNameAndCurrent(ctx, q, member.UserID)
 		if err != nil {
 			return err
@@ -220,13 +226,18 @@ func (s *Service) RemoveMember(ctx context.Context, member db.Member, isPlacehol
 			return err
 		}
 		if isPlaceholder {
-			return q.DeleteUserByID(ctx, member.UserID)
+			return s.deleteUserRow(ctx, q, member.UserID)
 		}
 		if err := s.MakeSureUserHasAtLeastOneOrganization(ctx, q, member.UserID, userName); err != nil {
 			return err
 		}
 		return s.MakeSureUserHasCurrentOrganization(ctx, q, member.UserID, userCurrent)
 	})
+	if err != nil {
+		return err
+	}
+	s.reap(reap)
+	return nil
 }
 
 // MakeMemberToPlaceholder ports MemberService::makeMemberToPlaceholder:
@@ -280,15 +291,21 @@ func (s *Service) MakeMemberToPlaceholder(ctx context.Context, q *db.Queries, me
 // MergePlaceholderInto ports MemberController::mergeInto's service part:
 // entities move to memberTo, then the placeholder member + user are deleted.
 func (s *Service) MergePlaceholderInto(ctx context.Context, from, to db.Member) error {
-	return s.withTx(ctx, func(q *db.Queries) error {
+	ctx, reap := withReaper(ctx)
+	err := s.withTx(ctx, func(q *db.Queries) error {
 		if err := s.AssignOrganizationEntitiesToDifferentMember(ctx, q, from, to); err != nil {
 			return err
 		}
 		if err := q.DeleteMember(ctx, from.ID); err != nil {
 			return err
 		}
-		return q.DeleteUserByID(ctx, from.UserID)
+		return s.deleteUserRow(ctx, q, from.UserID)
 	})
+	if err != nil {
+		return err
+	}
+	s.reap(reap)
+	return nil
 }
 
 // IsEmailAlreadyMember ports MemberService::isEmailAlreadyMember.

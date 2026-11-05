@@ -91,12 +91,12 @@ func (b *base) importGenericTimeEntries(ctx context.Context, data []byte) error 
 		if err := b.insertTimeEntry(ctx, timeEntryCreate{
 			UserID: userID, MemberID: memberID, TaskID: taskID,
 			ProjectID: projectID, ClientID: clientID,
-			Description: rec["description"],
-			Billable:    billable,
+			Description:  rec["description"],
+			Billable:     billable,
 			BillableRate: b.billableRate(billable, projectMember, project, member),
-			Tags:        tagIDs,
-			Start:       start,
-			End:         end,
+			Tags:         tagIDs,
+			Start:        start,
+			End:          end,
 		}); err != nil {
 			return err
 		}

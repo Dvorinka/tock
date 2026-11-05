@@ -4,6 +4,7 @@ import {
     formatMonth,
     formatReportingDuration,
     formatWeekRange,
+    secondsByLocalDay,
 } from './time';
 
 const seconds = 14 * 3600 + 45 * 60 + 6; // 14h 45m 06s
@@ -69,5 +70,35 @@ describe('formatWeekRange', () => {
 describe('formatMonth', () => {
     test('renders the name of the month that the key covers', () => {
         expect(formatMonth('2001-02')).toBe('February 2001');
+    });
+});
+
+describe('secondsByLocalDay', () => {
+    test('splits a span across UTC midnights', () => {
+        expect(
+            secondsByLocalDay('2026-01-01T22:00:00Z', '2026-01-03T01:00:00Z', 'UTC')
+        ).toEqual({
+            '2026-01-01': 2 * 3600,
+            '2026-01-02': 24 * 3600,
+            '2026-01-03': 3600,
+        });
+    });
+
+    test('puts an exact midnight end on the previous day only', () => {
+        expect(secondsByLocalDay('2026-01-01T22:00:00Z', '2026-01-02T00:00:00Z', 'UTC')).toEqual({
+            '2026-01-01': 2 * 3600,
+        });
+    });
+
+    test('uses the given zone, so a UTC span can stay on one local day', () => {
+        expect(
+            secondsByLocalDay('2026-11-04T22:00:00Z', '2026-11-05T02:00:00Z', 'America/New_York')
+        ).toEqual({
+            '2026-11-04': 4 * 3600,
+        });
+    });
+
+    test('returns nothing when the end is not after the start', () => {
+        expect(secondsByLocalDay('2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'UTC')).toEqual({});
     });
 });

@@ -216,11 +216,11 @@ func (s *Server) handleDestroyTag(w http.ResponseWriter, r *http.Request) {
 
 func clientResource(c db.Client) map[string]any {
 	return map[string]any{
-		"id":         domain.UUIDString(c.ID),
-		"name":       c.Name,
+		"id":          domain.UUIDString(c.ID),
+		"name":        c.Name,
 		"is_archived": c.ArchivedAt.Valid,
-		"created_at": iso8601(c.CreatedAt),
-		"updated_at": iso8601(c.UpdatedAt),
+		"created_at":  iso8601(c.CreatedAt),
+		"updated_at":  iso8601(c.UpdatedAt),
 	}
 }
 
@@ -407,18 +407,18 @@ func projectResource(p db.Project, showBillableRate bool) map[string]any {
 		estimated = *p.EstimatedTime
 	}
 	return map[string]any{
-		"id":            domain.UUIDString(p.ID),
-		"name":          p.Name,
-		"color":         p.Color,
-		"client_id":     nullableUUID(p.ClientID),
-		"is_archived":   p.ArchivedAt.Valid,
-		"billable_rate": rate,
-		"is_billable":   p.IsBillable,
+		"id":             domain.UUIDString(p.ID),
+		"name":           p.Name,
+		"color":          p.Color,
+		"client_id":      nullableUUID(p.ClientID),
+		"is_archived":    p.ArchivedAt.Valid,
+		"billable_rate":  rate,
+		"is_billable":    p.IsBillable,
 		"estimated_time": estimated,
-		"spent_time":    p.SpentTime,
-		"is_public":     p.IsPublic,
-		"created_at":    iso8601(p.CreatedAt),
-		"updated_at":    iso8601(p.UpdatedAt),
+		"spent_time":     p.SpentTime,
+		"is_public":      p.IsPublic,
+		"created_at":     iso8601(p.CreatedAt),
+		"updated_at":     iso8601(p.UpdatedAt),
 	}
 }
 

@@ -32,11 +32,6 @@ vitest.config.ts
 phpunit.xml
 phpstan.neon
 pint.json
-eslint.config.mjs
-tsconfig.json
-jsconfig.json
-postcss.config.js
-tailwind.config.js
 
 node_modules
 extensions/*/node_modules

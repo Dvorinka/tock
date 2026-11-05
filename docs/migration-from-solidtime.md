@@ -1,17 +1,26 @@
 # Migrating from solidtime to tock
 
 tock keeps the upstream database schema identical, so an existing solidtime
-Postgres database works unchanged.
+Postgres database works unchanged. A compose file from the upstream
+self-hosting examples can switch in place. The steps and the environment
+names tock already reads are in the README section "Switch from solidtime".
 
 ## Steps
 
 1. Stop the solidtime app (PHP-FPM / Octane / FrankenPHP workers).
 2. Dump the database: `pg_dump -Fc solidtime > backup.dump` (or run tock
    against the live database — it is additive only).
-3. Point tock at the same Postgres: `TOCK_DB_DSN=postgres://user:pass@host/solidtime?sslmode=disable`.
-4. Run `tock migrate`. Existing upstream dumps are detected (the `users` table
+3. Point tock at the same Postgres. Either keep `DB_HOST`, `DB_PORT`,
+   `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, and `DB_SSL_MODE`, or set
+   `TOCK_DB_DSN`. Also keep `APP_KEY` (or set `TOCK_APP_KEY`) so sessions
+   survive a restart, and keep `GOTENBERG_URL` when Gotenberg is not on
+   `127.0.0.1:3100`.
+4. `tock serve` applies pending migrations by default (`AUTO_DB_MIGRATE=true`).
+   You can also run `tock migrate` explicitly and set `AUTO_DB_MIGRATE=false`
+   when starting the server. Existing upstream dumps are detected (the `users` table
    exists and `goose_db_version` does not) and the baseline migration is marked
-   applied; only the invoicing tables are created on top.
+   applied. Later migrations add invoicing, import-run progress, and the
+   nullable OAuth PKCE columns. Upstream rows are left in place.
 5. Run `tock serve`. The SPA is embedded; no PHP, queue workers, or scheduler
    processes remain.
 
@@ -21,7 +30,9 @@ Postgres database works unchanged.
 - Password hashes (bcrypt/argon2id verify unchanged — existing logins work)
 - Sessions are Laravel-shaped but stored per-driver; users log in again
 - OAuth clients, access tokens, personal access tokens (token hashes match
-  Passport semantics; the stock solidtime desktop app pairs unmodified)
+  Passport semantics; the stock solidtime desktop app pairs unmodified).
+  Authorization-code PKCE challenges are stored on the auth-code row, so a
+  restart between consent and token exchange still requires the verifier.
 - Time entries, projects, tasks, clients, tags, reports, goals
 - Organization export ZIPs import through the `solidtime` importer
 

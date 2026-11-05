@@ -1,5 +1,6 @@
 import { adminTest as test, expect } from '../playwright/fixtures';
 import { PLAYWRIGHT_BASE_URL, TEST_USER_PASSWORD } from '../playwright/config';
+import { getEmailVerificationUrl } from './utils/mailpit';
 
 /**
  * Index pages of all Filament resources that ship with the core application.
@@ -40,6 +41,9 @@ test.describe('Admin Panel Access', () => {
         await page.getByLabel('Confirm Password').fill(TEST_USER_PASSWORD);
         await page.getByLabel('I agree to the Terms of').click();
         await page.getByRole('button', { name: 'Register' }).click();
+        await page.waitForURL('**/email/verify');
+        const verificationUrl = await getEmailVerificationUrl(page.context().request, email);
+        await page.goto(verificationUrl);
         await expect(page.getByTestId('dashboard_view')).toBeVisible();
 
         const response = await page.goto(PLAYWRIGHT_BASE_URL + '/admin');

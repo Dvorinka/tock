@@ -35,7 +35,6 @@ var aggregationTypes = map[string]bool{
 	"billable": true, "description": true, "tag": true, "type": true,
 }
 
-
 // tzShift mirrors TimezoneService::getShiftFromUtc — the CURRENT offset of
 // the user's timezone in seconds (upstream applies it uniformly).
 func tzShift(loc *time.Location) int {
@@ -149,10 +148,10 @@ const tagLateralJoin = `CROSS JOIN LATERAL (
 ) AS tag(tag)`
 
 type aggRow struct {
-	g1     *string
-	g2     *string
-	agg    int64
-	cost   int64
+	g1   *string
+	g2   *string
+	agg  int64
+	cost int64
 }
 
 // runAggregateQuery executes the grouped aggregation and returns rows in
@@ -330,7 +329,7 @@ func (s *Server) aggregate(ctx context.Context, f *teFilter, group1, group2 stri
 	if g1Sel != "" {
 		// group rows by g1 preserving order
 		type g1Bucket struct {
-			key *string
+			key  *string
 			rows []aggRow
 		}
 		buckets := []g1Bucket{}
@@ -495,6 +494,9 @@ func timeSlotsBetween(start, end time.Time, loc *time.Location, weekStart, inter
 func fillGapsInTimeGroups(data []map[string]any, groupType, subGroupType string, loc *time.Location, weekStart string, start, end time.Time) []map[string]any {
 	format, ok := map[string]string{"day": "2006-01-02", "week": "2006-01-02", "month": "2006-01", "year": "2006"}[groupType]
 	if !ok {
+		if subGroupType == "" {
+			return data
+		}
 		// Non-interval group: recurse into subgroups.
 		for i, item := range data {
 			sub, _ := item["grouped_data"].([]map[string]any)
@@ -655,11 +657,11 @@ func (s *Server) attachDescriptions(ctx context.Context, result map[string]any, 
 // parseAggregateParams extracts group/sub_group/fill_gaps/rounding shared
 // by aggregate + aggregateExport.
 type aggParams struct {
-	group1, group2   string
-	fillGaps         bool
-	roundingType     string
-	roundingMinutes  int
-	start, end       *time.Time
+	group1, group2  string
+	fillGaps        bool
+	roundingType    string
+	roundingMinutes int
+	start, end      *time.Time
 }
 
 func parseAggregateParams(r *http.Request, requireGroup bool) (aggParams, map[string][]string) {
@@ -905,7 +907,7 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		})
 		if err != nil {
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
@@ -920,7 +922,7 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 			false, nil, nil, showBillable, "", 0, false)
 		if aggErr != nil {
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var buf bytes.Buffer
@@ -937,7 +939,7 @@ func (s *Server) handleExportTimeEntries(w http.ResponseWriter, r *http.Request)
 		if err := detailedPDFTemplate.Execute(&buf, data); err != nil {
 			slog.Error("detailed pdf template failed", "error", err)
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var footer bytes.Buffer
@@ -983,7 +985,7 @@ func (s *Server) exportNames(r *http.Request, entries []db.TimeEntry) exportName
 	m := exportNameMaps{
 		users: map[string]string{}, projects: map[string]string{},
 		tasks: map[string]string{}, clients: map[string]string{},
-		tags:  map[string]string{},
+		tags: map[string]string{},
 	}
 	userIDs, projIDs, taskIDs, clientIDs, tagIDs := []string{}, []string{}, []string{}, []string{}, []string{}
 	seen := map[string]bool{}
@@ -1116,7 +1118,7 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 		})
 		if err != nil {
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"download_url": url})
@@ -1132,7 +1134,7 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 			userTZ(u), u.WeekStart, true, p.start, p.end, showBillable, p.roundingType, p.roundingMinutes, false)
 		if histErr != nil {
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		htmlData := s.aggPDFTemplateData(result, history, p.group1, p.group2, showBillable, loc, userTZ(u), r, debug)
@@ -1140,7 +1142,7 @@ func (s *Server) handleAggregateExportTimeEntries(w http.ResponseWriter, r *http
 		if err := aggregatePDFTemplate.Execute(&buf, htmlData); err != nil {
 			slog.Error("aggregate pdf template failed", "error", err)
 			slog.Error("aggregate error", "err", err)
-		writeMessage(w, http.StatusInternalServerError, "server error")
+			writeMessage(w, http.StatusInternalServerError, "server error")
 			return
 		}
 		var footer bytes.Buffer
@@ -1187,9 +1189,9 @@ func (s *Server) aggPDFTemplateData(result, history map[string]any, group, subGr
 			color = *c
 		}
 		pieItems = append(pieItems, map[string]any{
-			"value": intSeconds(g1["seconds"]),
-			"name":  label,
-			"color": color,
+			"value":     intSeconds(g1["seconds"]),
+			"name":      label,
+			"color":     color,
 			"itemStyle": map[string]any{"color": color},
 			"emphasis":  map[string]any{"itemStyle": map[string]any{"color": color}},
 		})

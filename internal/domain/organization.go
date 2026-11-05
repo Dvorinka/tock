@@ -94,9 +94,15 @@ func (s *Service) MakeSureUserHasCurrentOrganization(ctx context.Context, q *db.
 // DeleteOrganization ports DeletionService::deleteOrganization verbatim.
 // ignoreUserID mirrors $ignoreUser — that user's post-delete fixups are skipped.
 func (s *Service) DeleteOrganization(ctx context.Context, orgID, ignoreUserID pgtype.UUID) error {
-	return s.withTx(ctx, func(q *db.Queries) error {
+	ctx, reap := withReaper(ctx)
+	err := s.withTx(ctx, func(q *db.Queries) error {
 		return s.deleteOrganizationQ(ctx, q, orgID, ignoreUserID)
 	})
+	if err != nil {
+		return err
+	}
+	s.reap(reap)
+	return nil
 }
 
 func (s *Service) userName(ctx context.Context, q *db.Queries, id pgtype.UUID) (string, error) {

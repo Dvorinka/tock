@@ -70,7 +70,11 @@ createInertiaApp({
             return page.props.auth.user.timezone;
         };
 
-        app.use(plugin).use(pinia).use(ZiggyVue, Ziggy).use(VueQueryPlugin, { queryClient }).mount(el);
+        app.use(plugin)
+            .use(pinia)
+            .use(ZiggyVue, Ziggy)
+            .use(VueQueryPlugin, { queryClient })
+            .mount(el);
 
         // Setup Inertia prefetching to warm TanStack Query cache
         setupPrefetching(queryClient);

@@ -52,7 +52,7 @@ var shellTemplate = template.Must(template.New("shell").Parse(`<!DOCTYPE html>
         <meta name="msapplication-config" content="/favicons/browserconfig.xml">
         <meta name="theme-color" content="#000000">
 
-        <script>
+        <script nonce="{{ .Nonce }}">
             const Ziggy = {{ .Ziggy }};
         </script>
         {{- range .Styles }}

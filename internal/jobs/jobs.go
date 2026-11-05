@@ -53,6 +53,26 @@ func (w *Worker) Handle(jobType string, h Handler) {
 
 // Enqueue inserts a job row shaped like Laravel's database queue driver.
 func Enqueue(ctx context.Context, pool *pgxpool.Pool, queue, jobType string, data any) error {
+	return enqueue(ctx, queue, jobType, data, func(ctx context.Context, payload string, now int64) error {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO jobs (queue, payload, attempts, reserved_at, available_at, created_at)
+			 VALUES ($1, $2, 0, NULL, $3, $3)`, queue, payload, now)
+		return err
+	})
+}
+
+// EnqueueTx inserts a job in the caller's transaction so work cannot be
+// committed without its queue record or queued without its work record.
+func EnqueueTx(ctx context.Context, tx pgx.Tx, queue, jobType string, data any) error {
+	return enqueue(ctx, queue, jobType, data, func(ctx context.Context, payload string, now int64) error {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO jobs (queue, payload, attempts, reserved_at, available_at, created_at)
+			 VALUES ($1, $2, 0, NULL, $3, $3)`, queue, payload, now)
+		return err
+	})
+}
+
+func enqueue(ctx context.Context, queue, jobType string, data any, insert func(context.Context, string, int64) error) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -62,10 +82,7 @@ func Enqueue(ctx context.Context, pool *pgxpool.Pool, queue, jobType string, dat
 		return err
 	}
 	now := time.Now().Unix()
-	_, err = pool.Exec(ctx,
-		`INSERT INTO jobs (queue, payload, attempts, reserved_at, available_at, created_at)
-		 VALUES ($1, $2, 0, NULL, $3, $3)`, queue, string(payload), now)
-	return err
+	return insert(ctx, string(payload), now)
 }
 
 // Run polls until ctx is cancelled, claiming and executing jobs one at a time.
@@ -101,7 +118,8 @@ func (w *Worker) tick(ctx context.Context) (bool, error) {
 		UPDATE jobs SET reserved_at = $1, attempts = attempts + 1
 		WHERE id = (
 			SELECT id FROM jobs
-			WHERE reserved_at IS NULL AND available_at <= $1
+			WHERE (reserved_at IS NULL OR reserved_at < $1 - 90)
+			  AND available_at <= $1
 			ORDER BY id LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		)

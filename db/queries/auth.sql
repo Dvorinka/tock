@@ -58,12 +58,12 @@ SELECT * FROM oauth_clients WHERE id = $1;
 SELECT id FROM oauth_clients WHERE grant_types LIKE '%personal_access%' AND revoked = false LIMIT 1;
 
 -- name: InsertAuthCode :exec
-INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at)
-VALUES ($1, $2, $3, $4, false, $5);
+INSERT INTO oauth_auth_codes (id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method)
+VALUES ($1, $2, $3, $4, false, $5, $6, $7);
 
 -- name: ConsumeAuthCode :one
 DELETE FROM oauth_auth_codes WHERE id = $1 AND revoked = false AND expires_at > now()
-RETURNING *;
+RETURNING id, user_id, client_id, scopes, revoked, expires_at, code_challenge, code_challenge_method;
 
 -- name: InsertAccessToken :exec
 INSERT INTO oauth_access_tokens (id, user_id, client_id, name, scopes, revoked, created_at, updated_at, expires_at)

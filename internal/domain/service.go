@@ -14,13 +14,17 @@ import (
 // Service is the ported service layer. All multi-statement mutations run in a
 // transaction, mirroring Laravel's DB::transaction call sites.
 type Service struct {
-	pool *pgxpool.Pool
-	q    *db.Queries
+	pool       *pgxpool.Pool
+	q          *db.Queries
+	storageDir string
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, q: db.New(pool)}
 }
+
+// SetStorageDir is where uploaded profile photos live. Empty skips file removal.
+func (s *Service) SetStorageDir(dir string) { s.storageDir = dir }
 
 // UUID parses a UUID route parameter; ok=false on malformed input.
 func UUID(s string) (pgtype.UUID, bool) {
