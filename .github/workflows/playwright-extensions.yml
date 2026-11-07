@@ -5,7 +5,7 @@ permissions:
 jobs:
   test:
     name: test (${{ matrix.variant }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 60
     # Same extension sets as build-private.yml and build-onpremise.yml, so the extension specs run
     # with and without Billing.
